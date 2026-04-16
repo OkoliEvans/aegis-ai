@@ -1,28 +1,32 @@
 use guardian_analyzer::{anomaly, approvals, contract, ica, llm, poison};
 use guardian_core::{
-    models::TxPattern, GuardianConfig, GuardianDecision, GuardianStore, IncomingTx, RiskFinding,
-    Severity,
+    models::TxPattern, GuardianConfig, GuardianDecision, GuardianRepository, IncomingTx,
+    RiskFinding, Severity,
 };
 use guardian_simulator::simulate;
 use std::sync::Arc;
 
 pub struct GuardianAgent {
     config: GuardianConfig,
-    store: Arc<GuardianStore>,
+    repository: Arc<dyn GuardianRepository>,
 }
 
 impl GuardianAgent {
-    pub fn new(config: GuardianConfig, store: Arc<GuardianStore>) -> Self {
-        Self { config, store }
+    pub fn new(config: GuardianConfig, repository: Arc<dyn GuardianRepository>) -> Self {
+        Self { config, repository }
     }
 
-    pub fn store(&self) -> &Arc<GuardianStore> {
-        &self.store
+    pub fn repository(&self) -> &Arc<dyn GuardianRepository> {
+        &self.repository
     }
 
     pub async fn evaluate(&self, tx: &IncomingTx, raw_bytes: &[u8]) -> GuardianDecision {
-        let known_addrs = self.store.known_addresses(&tx.sender).await;
-        let baseline = self.store.tx_pattern(&tx.sender).await;
+        let known_addrs = self
+            .repository
+            .known_addresses(&tx.sender)
+            .await
+            .unwrap_or_default();
+        let baseline = self.repository.tx_pattern(&tx.sender).await.ok().flatten();
         let current_height = self.current_height().await;
 
         let simulation_result = simulate(&self.config.initia_lcd, raw_bytes).await.ok();
@@ -128,9 +132,14 @@ impl GuardianAgent {
         let fresh_approvals =
             match approvals::scan_approvals(&self.config.initia_lcd, &tx.sender).await {
                 Ok(approvals) => approvals,
-                Err(_) => self.store.approval_records(&tx.sender).await,
+                Err(_) => self
+                    .repository
+                    .approval_records(&tx.sender)
+                    .await
+                    .unwrap_or_default(),
             };
-        self.store
+        let _ = self
+            .repository
             .set_approval_records(&tx.sender, fresh_approvals.clone())
             .await;
         for approval in &fresh_approvals {
@@ -197,9 +206,10 @@ impl GuardianAgent {
         if matches!(total, 0..=29) {
             if let Some(mut stored_baseline) = baseline.clone() {
                 anomaly::update_baseline(&mut stored_baseline, tx);
-                self.store.upsert_tx_pattern(stored_baseline).await;
+                let _ = self.repository.upsert_tx_pattern(stored_baseline).await;
             } else {
-                self.store
+                let _ = self
+                    .repository
                     .upsert_tx_pattern(TxPattern {
                         address: tx.sender.clone(),
                         avg_value_uinit: tx.amount.parse::<i64>().unwrap_or_default(),
@@ -264,7 +274,20 @@ impl GuardianAgent {
     }
 
     async fn current_height(&self) -> i64 {
-        0
+        let endpoint = format!("{}/status", self.config.initia_rpc.trim_end_matches('/'));
+        match reqwest::Client::new().get(endpoint).send().await {
+            Ok(response) => {
+                let body: serde_json::Value = match response.json().await {
+                    Ok(body) => body,
+                    Err(_) => return 0,
+                };
+                body.pointer("/result/sync_info/latest_block_height")
+                    .and_then(|value| value.as_str())
+                    .and_then(|value| value.parse::<i64>().ok())
+                    .unwrap_or_default()
+            }
+            Err(_) => 0,
+        }
     }
 }
 

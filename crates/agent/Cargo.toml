@@ -10,6 +10,7 @@ chrono.workspace = true
 guardian-analyzer = { path = "../analyzer" }
 guardian-core = { path = "../core" }
 guardian-simulator = { path = "../simulator" }
+reqwest.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true

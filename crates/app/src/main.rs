@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use guardian_agent::GuardianAgent;
 use guardian_api::{build_router, AppState};
-use guardian_core::{GuardianConfig, GuardianStore};
+use guardian_core::{build_repository, GuardianConfig};
 use guardian_monitor::stream_events;
 use guardian_notifier::Notifier;
 use tokio::sync::mpsc;
@@ -22,12 +22,12 @@ async fn main() -> Result<()> {
 
     let config = GuardianConfig::from_env()?;
     let bind_addr = config.bind_addr()?;
-    let store = Arc::new(GuardianStore::new());
+    let repository = build_repository(config.database_url.as_deref()).await?;
     let notifier = Arc::new(Notifier::new(
         config.telegram_bot_token.as_deref(),
-        store.clone(),
+        repository.clone(),
     ));
-    let agent = Arc::new(GuardianAgent::new(config.clone(), store));
+    let agent = Arc::new(GuardianAgent::new(config.clone(), repository));
 
     let state = AppState {
         config: config.clone(),

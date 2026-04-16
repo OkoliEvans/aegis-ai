@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use guardian_core::{GuardianStore, RiskFinding};
+use guardian_core::{GuardianRepository, RiskFinding};
 use teloxide::{prelude::*, types::ParseMode};
 use tokio::sync::broadcast;
 
@@ -8,16 +8,16 @@ use tokio::sync::broadcast;
 pub struct Notifier {
     bot: Option<Bot>,
     sse_tx: broadcast::Sender<String>,
-    store: Arc<GuardianStore>,
+    repository: Arc<dyn GuardianRepository>,
 }
 
 impl Notifier {
-    pub fn new(bot_token: Option<&str>, store: Arc<GuardianStore>) -> Self {
+    pub fn new(bot_token: Option<&str>, repository: Arc<dyn GuardianRepository>) -> Self {
         let (sse_tx, _) = broadcast::channel(512);
         Self {
             bot: bot_token.map(Bot::new),
             sse_tx,
-            store,
+            repository,
         }
     }
 
@@ -33,13 +33,16 @@ impl Notifier {
         });
 
         for finding in findings {
-            self.store.store_risk_event(address, finding, tx_hash).await;
+            let _ = self
+                .repository
+                .store_risk_event(address, finding, tx_hash)
+                .await;
         }
 
         let _ = self.sse_tx.send(payload.to_string());
 
         if let Some(bot) = &self.bot {
-            if let Some(chat_id) = self.store.telegram_chat_id(address).await {
+            if let Ok(Some(chat_id)) = self.repository.telegram_chat_id(address).await {
                 let message = format_telegram_alert(findings);
                 let _ = bot
                     .send_message(ChatId(chat_id), message)
@@ -50,7 +53,7 @@ impl Notifier {
     }
 
     pub async fn register_address(&self, address: &str, chat_id: i64) {
-        self.store.register_telegram(address, chat_id).await;
+        let _ = self.repository.register_telegram(address, chat_id).await;
     }
 }
 
