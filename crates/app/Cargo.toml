@@ -1,0 +1,17 @@
+[package]
+name = "guardian-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+guardian-agent = { path = "../agent" }
+guardian-api = { path = "../api" }
+guardian-core = { path = "../core" }
+guardian-monitor = { path = "../monitor" }
+guardian-notifier = { path = "../notifier" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

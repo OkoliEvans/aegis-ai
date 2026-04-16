@@ -1,0 +1,201 @@
+   0.200929042s  INFO prepare_target{force=false package_id=guardian-agent v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/agent) target="guardian_agent"}: cargo::core::compiler::fingerprint: fingerprint error for guardian-agent v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/agent)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("guardian_agent", ["lib"], "/Users/MAC/Rust/aegis_guard/crates/agent/src/lib.rs", Edition2021) }
+   0.201445125s  INFO prepare_target{force=false package_id=guardian-agent v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/agent) target="guardian_agent"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/MAC/Rust/aegis_guard/target/debug/.fingerprint/guardian-agent-77ae78692f760f43/test-lib-guardian_agent`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.226779292s  INFO prepare_target{force=false package_id=guardian-analyzer v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/analyzer) target="guardian_analyzer"}: cargo::core::compiler::fingerprint: fingerprint error for guardian-analyzer v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/analyzer)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("guardian_analyzer", ["lib"], "/Users/MAC/Rust/aegis_guard/crates/analyzer/src/lib.rs", Edition2021) }
+   0.226794084s  INFO prepare_target{force=false package_id=guardian-analyzer v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/analyzer) target="guardian_analyzer"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/MAC/Rust/aegis_guard/target/debug/.fingerprint/guardian-analyzer-ec626a1e7f9e9bac/test-lib-guardian_analyzer`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.248480334s  INFO prepare_target{force=false package_id=guardian-api v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/api) target="guardian_api"}: cargo::core::compiler::fingerprint: fingerprint error for guardian-api v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/api)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("guardian_api", ["lib"], "/Users/MAC/Rust/aegis_guard/crates/api/src/lib.rs", Edition2021) }
+   0.248496542s  INFO prepare_target{force=false package_id=guardian-api v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/api) target="guardian_api"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/MAC/Rust/aegis_guard/target/debug/.fingerprint/guardian-api-656d0d4abdf0412c/test-lib-guardian_api`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.256321584s  INFO prepare_target{force=false package_id=guardian-app v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/app) target="guardian-app"}: cargo::core::compiler::fingerprint: fingerprint error for guardian-app v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/app)/Check { test: true }/TargetInner { name: "guardian-app", doc: true, ..: with_path("/Users/MAC/Rust/aegis_guard/crates/app/src/main.rs", Edition2021) }
+   0.256338250s  INFO prepare_target{force=false package_id=guardian-app v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/app) target="guardian-app"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/MAC/Rust/aegis_guard/target/debug/.fingerprint/guardian-app-5886bf6c19ad59ad/test-bin-guardian-app`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.257394292s  INFO prepare_target{force=false package_id=guardian-core v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/core) target="guardian_core"}: cargo::core::compiler::fingerprint: fingerprint error for guardian-core v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/core)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("guardian_core", ["lib"], "/Users/MAC/Rust/aegis_guard/crates/core/src/lib.rs", Edition2021) }
+   0.257409334s  INFO prepare_target{force=false package_id=guardian-core v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/core) target="guardian_core"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/MAC/Rust/aegis_guard/target/debug/.fingerprint/guardian-core-084d788f87f2565c/test-lib-guardian_core`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.257952875s  INFO prepare_target{force=false package_id=guardian-monitor v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/monitor) target="guardian_monitor"}: cargo::core::compiler::fingerprint: fingerprint error for guardian-monitor v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/monitor)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("guardian_monitor", ["lib"], "/Users/MAC/Rust/aegis_guard/crates/monitor/src/lib.rs", Edition2021) }
+   0.257958459s  INFO prepare_target{force=false package_id=guardian-monitor v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/monitor) target="guardian_monitor"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/MAC/Rust/aegis_guard/target/debug/.fingerprint/guardian-monitor-10335cc58489c552/test-lib-guardian_monitor`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.258425459s  INFO prepare_target{force=false package_id=guardian-notifier v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/notifier) target="guardian_notifier"}: cargo::core::compiler::fingerprint: fingerprint error for guardian-notifier v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/notifier)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("guardian_notifier", ["lib"], "/Users/MAC/Rust/aegis_guard/crates/notifier/src/lib.rs", Edition2021) }
+   0.258431459s  INFO prepare_target{force=false package_id=guardian-notifier v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/notifier) target="guardian_notifier"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/MAC/Rust/aegis_guard/target/debug/.fingerprint/guardian-notifier-f91eccc0a317e3ad/test-lib-guardian_notifier`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+   0.259032250s  INFO prepare_target{force=false package_id=guardian-simulator v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/simulator) target="guardian_simulator"}: cargo::core::compiler::fingerprint: fingerprint error for guardian-simulator v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/simulator)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("guardian_simulator", ["lib"], "/Users/MAC/Rust/aegis_guard/crates/simulator/src/lib.rs", Edition2021) }
+   0.259039792s  INFO prepare_target{force=false package_id=guardian-simulator v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/simulator) target="guardian_simulator"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/MAC/Rust/aegis_guard/target/debug/.fingerprint/guardian-simulator-44fe945650f01c51/test-lib-guardian_simulator`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: cargo_util::paths::read_bytes
+   2: cargo_util::paths::read
+   3: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   4: cargo::core::compiler::fingerprint::prepare_target
+   5: cargo::core::compiler::compile
+   6: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   7: cargo::ops::cargo_compile::compile_ws
+   8: cargo::ops::cargo_compile::compile_with_exec
+   9: cargo::ops::cargo_compile::compile
+  10: cargo::commands::check::exec
+  11: <cargo::cli::Exec>::exec
+  12: cargo::main
+  13: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  14: std::rt::lang_start::<()>::{closure#0}
+  15: std::rt::lang_start_internal
+  16: _main
+    Checking guardian-notifier v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/notifier)
+    Checking guardian-agent v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/agent)
+    Checking guardian-analyzer v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/analyzer)
+    Checking guardian-simulator v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/simulator)
+    Checking guardian-core v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/core)
+    Checking guardian-api v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/api)
+    Checking guardian-monitor v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/monitor)
+    Checking guardian-app v0.1.0 (/Users/MAC/Rust/aegis_guard/crates/app)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.24s
