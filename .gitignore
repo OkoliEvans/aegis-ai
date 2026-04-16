@@ -1,0 +1,21 @@
+/target/
+/target
+
+# Environment and local secrets
+.env
+.env.local
+.env.*.local
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+
+# Local project reference docs
+GUARDIAN_IMPL_GUIDE (1).md
+GUARDIAN_README (1).md

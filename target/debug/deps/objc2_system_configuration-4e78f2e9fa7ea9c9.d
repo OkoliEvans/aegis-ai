@@ -1,8 +1,0 @@
-/Users/MAC/Rust/aegis_guard/target/debug/deps/objc2_system_configuration-4e78f2e9fa7ea9c9.d: /Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/lib.rs /Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/generated/mod.rs /Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/generated/SCDynamicStore.rs /Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/generated/SCDynamicStoreCopySpecific.rs
-
-/Users/MAC/Rust/aegis_guard/target/debug/deps/libobjc2_system_configuration-4e78f2e9fa7ea9c9.rmeta: /Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/lib.rs /Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/generated/mod.rs /Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/generated/SCDynamicStore.rs /Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/generated/SCDynamicStoreCopySpecific.rs
-
-/Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/lib.rs:
-/Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/generated/mod.rs:
-/Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/generated/SCDynamicStore.rs:
-/Users/MAC/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/objc2-system-configuration-0.3.2/src/generated/SCDynamicStoreCopySpecific.rs:
