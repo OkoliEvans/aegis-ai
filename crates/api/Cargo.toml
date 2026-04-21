@@ -8,14 +8,17 @@ license.workspace = true
 axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
-cosmrs.workspace = true
+cosmrs = { workspace = true, features = ["cosmwasm"] }
 futures-util.workspace = true
 guardian-agent = { path = "../agent" }
+guardian-analyzer = { path = "../analyzer" }
 guardian-core = { path = "../core" }
 guardian-notifier = { path = "../notifier" }
+guardian-simulations = { path = "../../simulations" }
 prost.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio-stream.workspace = true
+tower-http.workspace = true
 tracing.workspace = true

@@ -54,6 +54,7 @@ const DRAIN_NAME_HINTS: &[&str] = &[
     "rug",
     "set_owner",
 ];
+const SUSPICIOUS_LABEL_HINTS: &[&str] = &["test", "drain", "rug", "exploit", "admin"];
 
 pub async fn score_contract(
     lcd: &str,
@@ -61,7 +62,20 @@ pub async fn score_contract(
     current_height: i64,
     sim_fund_destination: Option<&str>,
     known_protocols: &[String],
+    called_function: Option<&str>,
 ) -> Result<ContractRisk> {
+    if let Ok(risk) = score_wasm_contract(
+        lcd,
+        module_addr,
+        sim_fund_destination,
+        known_protocols,
+        called_function,
+    )
+    .await
+    {
+        return Ok(risk);
+    }
+
     let module = fetch_primary_module(lcd, module_addr).await?;
     let age_blocks = current_height.saturating_sub(
         module
@@ -124,6 +138,16 @@ pub async fn score_contract(
     if !drain_fn_names.is_empty() {
         score += 10;
     }
+    if called_function
+        .map(|function| {
+            DRAIN_NAME_HINTS
+                .iter()
+                .any(|hint| function.to_ascii_lowercase().contains(hint))
+        })
+        .unwrap_or(false)
+    {
+        score += 20;
+    }
 
     Ok(ContractRisk {
         score: score.min(100),
@@ -137,6 +161,13 @@ pub async fn score_contract(
 }
 
 pub async fn fetch_module_bytecode_pub(lcd: &str, addr: &str) -> Result<Vec<u8>> {
+    if let Ok(contract_info) = fetch_wasm_contract_info(lcd, addr).await {
+        return fetch_wasm_code_bytes(
+            lcd,
+            contract_info.code_id.parse::<u64>().unwrap_or_default(),
+        )
+        .await;
+    }
     let module = fetch_primary_module(lcd, addr).await?;
     Ok(STANDARD
         .decode(module.raw_bytes.as_bytes())
@@ -187,4 +218,129 @@ fn contains_sequence(haystack: &[u8], needle: &[u8]) -> bool {
         && haystack
             .windows(needle.len())
             .any(|window| window == needle)
+}
+
+#[derive(Debug, Deserialize)]
+struct WasmContractInfoEnvelope {
+    contract_info: WasmContractInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct WasmContractInfo {
+    code_id: String,
+    creator: String,
+    admin: String,
+    label: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct WasmCodeBytesEnvelope {
+    data: String,
+}
+
+async fn score_wasm_contract(
+    lcd: &str,
+    contract_addr: &str,
+    sim_fund_destination: Option<&str>,
+    known_protocols: &[String],
+    called_function: Option<&str>,
+) -> Result<ContractRisk> {
+    let info = fetch_wasm_contract_info(lcd, contract_addr).await?;
+    let code_id = info.code_id.parse::<u64>().unwrap_or_default();
+    let is_verified = check_verified(contract_addr, known_protocols)
+        || known_protocols
+            .iter()
+            .any(|protocol| protocol == &info.creator);
+    let is_upgradeable = !info.admin.is_empty();
+    let unexpected_flow = sim_fund_destination
+        .map(|destination| {
+            destination != contract_addr
+                && !known_protocols
+                    .iter()
+                    .any(|protocol| protocol == destination)
+        })
+        .unwrap_or(false);
+
+    let mut suspicious_opcodes = Vec::new();
+    if is_upgradeable {
+        suspicious_opcodes.push("WASM_ADMIN_PRESENT".to_string());
+    }
+    if SUSPICIOUS_LABEL_HINTS
+        .iter()
+        .any(|hint| info.label.to_ascii_lowercase().contains(hint))
+    {
+        suspicious_opcodes.push("SUSPICIOUS_LABEL".to_string());
+    }
+
+    let mut drain_fn_names = Vec::new();
+    if let Some(function) = called_function {
+        if DRAIN_NAME_HINTS
+            .iter()
+            .any(|hint| function.to_ascii_lowercase().contains(hint))
+        {
+            drain_fn_names.push(function.to_string());
+        }
+    }
+
+    let mut score = 0;
+    if !is_verified {
+        score += 25;
+    }
+    if is_upgradeable {
+        score += 25;
+    }
+    if !drain_fn_names.is_empty() {
+        score += 20;
+    }
+    if unexpected_flow {
+        score += 50;
+    }
+    if code_id <= 3 {
+        score += 10;
+    }
+    score += (suspicious_opcodes.len() as i32) * 10;
+
+    Ok(ContractRisk {
+        score: score.min(100),
+        age_blocks: 0,
+        is_verified,
+        is_upgradeable,
+        suspicious_opcodes,
+        unexpected_flow,
+        drain_fn_names,
+    })
+}
+
+async fn fetch_wasm_contract_info(lcd: &str, addr: &str) -> Result<WasmContractInfo> {
+    let endpoint = format!(
+        "{}/cosmwasm/wasm/v1/contract/{addr}",
+        lcd.trim_end_matches('/')
+    );
+    let response: WasmContractInfoEnvelope = Client::new()
+        .get(endpoint)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .context("failed to decode wasm contract info")?;
+    Ok(response.contract_info)
+}
+
+async fn fetch_wasm_code_bytes(lcd: &str, code_id: u64) -> Result<Vec<u8>> {
+    let endpoint = format!(
+        "{}/cosmwasm/wasm/v1/code/{code_id}/download",
+        lcd.trim_end_matches('/')
+    );
+    let response: WasmCodeBytesEnvelope = Client::new()
+        .get(endpoint)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .context("failed to decode wasm code bytes response")?;
+    STANDARD
+        .decode(response.data.as_bytes())
+        .context("failed to decode wasm code bytes")
 }

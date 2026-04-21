@@ -17,6 +17,7 @@ pub struct IncomingTx {
     pub denom: String,
     pub contract_address: Option<String>,
     pub function_name: Option<String>,
+    pub contract_msg: Option<serde_json::Value>,
     pub controller_chain: Option<String>,
     pub message_type: Option<String>,
     pub raw_bytes: Vec<u8>,
@@ -42,6 +43,8 @@ pub struct SimulationResult {
     pub fail_reason: Option<String>,
     pub gas_estimate: u64,
     pub balance_deltas: Vec<BalanceDelta>,
+    pub observed_actions: Vec<String>,
+    pub touched_contracts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

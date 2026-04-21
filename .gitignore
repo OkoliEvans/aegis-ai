@@ -5,6 +5,9 @@
 .env
 .env.local
 .env.*.local
+.agents/
+.claude/
+skills-lock.json
 
 # Editor and OS files
 .DS_Store
@@ -15,6 +18,17 @@
 *.log
 *.tmp
 *.temp
+node_modules/
+dist/
+.turbo/
+.initia/
+initia/
+miniwasm/
+
+# Contract build outputs
+contracts/**/target/
+contracts/**/artifacts/
+contracts/**/Cargo.lock
 
 # Local project reference docs
 GUARDIAN_IMPL_GUIDE (1).md

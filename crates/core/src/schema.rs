@@ -1,58 +1,75 @@
+// @generated automatically by Diesel CLI.
+
 diesel::table! {
     approval_records (id) {
-        id -> diesel::sql_types::Uuid,
-        owner -> diesel::sql_types::Text,
-        spender -> diesel::sql_types::Text,
-        token_denom -> diesel::sql_types::Text,
-        amount -> diesel::sql_types::Text,
-        granted_at_height -> diesel::sql_types::BigInt,
-        revoked -> diesel::sql_types::Bool,
-        risk_score -> diesel::sql_types::Integer,
-        created_at -> diesel::sql_types::Timestamptz,
+        id -> Uuid,
+        owner -> Text,
+        spender -> Text,
+        token_denom -> Text,
+        amount -> Text,
+        granted_at_height -> Int8,
+        revoked -> Bool,
+        risk_score -> Int4,
+        created_at -> Timestamptz,
+        approval_type -> Nullable<Text>,
+        contract_address -> Nullable<Text>,
+        revoke_messages -> Jsonb,
     }
 }
 
 diesel::table! {
     registered_users (id) {
-        id -> diesel::sql_types::Uuid,
-        address -> diesel::sql_types::Text,
-        telegram_chat_id -> diesel::sql_types::Nullable<diesel::sql_types::BigInt>,
-        created_at -> diesel::sql_types::Timestamptz,
+        id -> Uuid,
+        address -> Text,
+        telegram_chat_id -> Nullable<Int8>,
+        created_at -> Timestamptz,
+        telegram_handle -> Nullable<Text>,
+        email_address -> Nullable<Text>,
+        email_display_name -> Nullable<Text>,
     }
 }
 
 diesel::table! {
     risk_events (id) {
-        id -> diesel::sql_types::Uuid,
-        address -> diesel::sql_types::Text,
-        event_type -> diesel::sql_types::Text,
-        severity -> diesel::sql_types::Text,
-        tx_hash -> diesel::sql_types::Nullable<diesel::sql_types::Text>,
-        payload -> diesel::sql_types::Jsonb,
-        created_at -> diesel::sql_types::Timestamptz,
+        id -> Uuid,
+        address -> Text,
+        event_type -> Text,
+        severity -> Text,
+        tx_hash -> Nullable<Text>,
+        payload -> Jsonb,
+        created_at -> Timestamptz,
     }
 }
 
 diesel::table! {
     tx_patterns (address) {
-        address -> diesel::sql_types::Text,
-        avg_value_uinit -> diesel::sql_types::BigInt,
-        typical_recipients -> diesel::sql_types::Jsonb,
-        typical_hour_utc -> diesel::sql_types::Integer,
-        sample_count -> diesel::sql_types::Integer,
-        updated_at -> diesel::sql_types::Timestamptz,
+        address -> Text,
+        avg_value_uinit -> Int8,
+        typical_recipients -> Jsonb,
+        typical_hour_utc -> Int4,
+        sample_count -> Int4,
+        updated_at -> Timestamptz,
     }
 }
 
 diesel::table! {
     watched_addresses (id) {
-        id -> diesel::sql_types::Uuid,
-        address -> diesel::sql_types::Text,
-        label -> diesel::sql_types::Nullable<diesel::sql_types::Text>,
-        owner_address -> diesel::sql_types::Text,
-        is_poisoned -> diesel::sql_types::Bool,
-        risk_score -> diesel::sql_types::Integer,
-        first_seen -> diesel::sql_types::Timestamptz,
-        last_activity -> diesel::sql_types::Timestamptz,
+        id -> Uuid,
+        address -> Text,
+        label -> Nullable<Text>,
+        owner_address -> Text,
+        is_poisoned -> Bool,
+        risk_score -> Int4,
+        first_seen -> Timestamptz,
+        last_activity -> Timestamptz,
+        is_simulation_target -> Bool,
     }
 }
+
+diesel::allow_tables_to_appear_in_same_query!(
+    approval_records,
+    registered_users,
+    risk_events,
+    tx_patterns,
+    watched_addresses,
+);

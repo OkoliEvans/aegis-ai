@@ -67,3 +67,32 @@ fn shorten(address: &str) -> String {
         format!("{}...{}", &address[..8], &address[address.len() - 6..])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::check_poison;
+
+    #[test]
+    fn flags_visually_similar_address_with_same_prefix_and_suffix() {
+        let known = vec!["init1abcde999999999999999999999999999xyz123".to_string()];
+        let suspicious = "init1abcde888899999999999999999999999xyz123";
+
+        let finding = check_poison(suspicious, &known).expect("poison finding expected");
+        assert_eq!(finding.module, "poison");
+        assert_eq!(finding.weight, 85);
+    }
+
+    #[test]
+    fn ignores_exact_known_address() {
+        let known = vec!["init1trusted000000000000000000000000000safe".to_string()];
+        let finding = check_poison("init1trusted000000000000000000000000000safe", &known);
+        assert!(finding.is_none());
+    }
+
+    #[test]
+    fn ignores_unrelated_address_even_if_same_length() {
+        let known = vec!["init1abcde999999999999999999999999999xyz123".to_string()];
+        let unrelated = "init1zzzzz111111111111111111111111111qqq777";
+        assert!(check_poison(unrelated, &known).is_none());
+    }
+}

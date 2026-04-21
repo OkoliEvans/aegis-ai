@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use guardian_core::{RiskFinding, Severity};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -36,7 +37,46 @@ impl BytecodeRiskAssessment {
     }
 }
 
-pub async fn llm_assess(ctx: &TxContext, api_key: &str) -> Result<String> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriageAssessment {
+    pub risk_level: String,
+    pub primary_concern: String,
+    pub recommended_action: String,
+    pub reasoning: String,
+}
+
+impl TriageAssessment {
+    pub fn unknown() -> Self {
+        Self {
+            risk_level: "medium".to_string(),
+            primary_concern: "Unable to parse LLM triage output".to_string(),
+            recommended_action: "warn".to_string(),
+            reasoning: "Guardian fell back to a conservative warn posture because the LLM response could not be parsed.".to_string(),
+        }
+    }
+
+    pub fn severity(&self) -> Severity {
+        match self.risk_level.as_str() {
+            "critical" => Severity::Critical,
+            "high" => Severity::High,
+            "medium" => Severity::Medium,
+            _ => Severity::Low,
+        }
+    }
+
+    pub fn weight(&self) -> i32 {
+        match (self.risk_level.as_str(), self.recommended_action.as_str()) {
+            ("critical", "block") => 35,
+            ("high", "block") => 30,
+            ("high", "warn") => 25,
+            ("medium", "block") => 20,
+            ("medium", "warn") => 15,
+            _ => 10,
+        }
+    }
+}
+
+pub async fn llm_assess(ctx: &TxContext, api_key: &str) -> Result<TriageAssessment> {
     let prompt = format!(
         r#"You are a blockchain security analyst for the Initia chain.
 
@@ -65,7 +105,8 @@ Respond ONLY with JSON:
         ctx.user_baseline_avg,
     );
 
-    call_claude(&prompt, api_key, 256).await
+    let raw = call_claude(&prompt, api_key, 256).await?;
+    Ok(serde_json::from_str(&raw).unwrap_or_else(|_| TriageAssessment::unknown()))
 }
 
 pub async fn llm_analyze_bytecode(
@@ -117,4 +158,43 @@ async fn call_claude(prompt: &str, api_key: &str, max_tokens: u32) -> Result<Str
         .as_str()
         .unwrap_or("{}")
         .to_string())
+}
+
+pub fn triage_finding(assessment: &TriageAssessment) -> RiskFinding {
+    RiskFinding {
+        module: "llm_triage".to_string(),
+        severity: assessment.severity(),
+        weight: assessment.weight(),
+        description: format!(
+            "LLM triage: {}. Recommended action: {}",
+            assessment.primary_concern, assessment.recommended_action
+        ),
+        payload: serde_json::json!({
+            "risk_level": assessment.risk_level,
+            "primary_concern": assessment.primary_concern,
+            "recommended_action": assessment.recommended_action,
+            "reasoning": assessment.reasoning,
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{triage_finding, TriageAssessment};
+    use guardian_core::Severity;
+
+    #[test]
+    fn triage_assessment_maps_to_weighted_finding() {
+        let finding = triage_finding(&TriageAssessment {
+            risk_level: "high".to_string(),
+            primary_concern: "First-time contract with suspicious drain path".to_string(),
+            recommended_action: "block".to_string(),
+            reasoning: "The contract is unverified and the requested function is atypical."
+                .to_string(),
+        });
+
+        assert_eq!(finding.module, "llm_triage");
+        assert!(matches!(finding.severity, Severity::High));
+        assert!(finding.weight >= 25);
+    }
 }

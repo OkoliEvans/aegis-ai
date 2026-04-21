@@ -2,7 +2,12 @@ use axum::{body::Bytes, extract::State, response::Json};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use cosmrs::proto::cosmos::{
     bank::v1beta1::{MsgMultiSend, MsgSend},
+    feegrant::v1beta1::MsgGrantAllowance,
     tx::v1beta1::{TxBody, TxRaw},
+};
+use cosmrs::proto::cosmwasm::wasm::v1::{
+    MsgClearAdmin, MsgExecuteContract, MsgInstantiateContract, MsgMigrateContract, MsgStoreCode,
+    MsgUpdateAdmin,
 };
 use guardian_core::{GuardianDecision, IncomingTx};
 use prost::Message;
@@ -98,6 +103,7 @@ fn parse_cosmos_tx(tx_bytes: &[u8]) -> IncomingTx {
             denom: decoded.denom,
             contract_address: decoded.contract_address,
             function_name: decoded.function_name,
+            contract_msg: decoded.contract_msg,
             controller_chain: decoded.controller_chain,
             message_type: decoded.message_type,
             raw_bytes: tx_bytes.to_vec(),
@@ -112,6 +118,7 @@ fn parse_cosmos_tx(tx_bytes: &[u8]) -> IncomingTx {
         denom: "uinit".to_string(),
         contract_address: None,
         function_name: None,
+        contract_msg: None,
         controller_chain: None,
         message_type: None,
         raw_bytes: tx_bytes.to_vec(),
@@ -131,6 +138,7 @@ fn decode_protobuf_tx(tx_bytes: &[u8]) -> Option<IncomingTx> {
         denom: "uinit".to_string(),
         contract_address: None,
         function_name: None,
+        contract_msg: None,
         controller_chain: None,
         message_type: Some(first_message.type_url.clone()),
         raw_bytes: tx_bytes.to_vec(),
@@ -160,10 +168,84 @@ fn decode_protobuf_tx(tx_bytes: &[u8]) -> Option<IncomingTx> {
                 tx.recipient = output.address.clone();
             }
         }
+        "/cosmwasm.wasm.v1.MsgExecuteContract" => {
+            let message = MsgExecuteContract::decode(first_message.value.as_slice()).ok()?;
+            tx.sender = message.sender;
+            tx.recipient = message.contract.clone();
+            tx.contract_address = Some(message.contract);
+            if let Some(coin) = message.funds.first() {
+                tx.amount = coin.amount.clone();
+                tx.denom = coin.denom.clone();
+            }
+            tx.function_name = decode_contract_message_name(&message.msg);
+            tx.contract_msg = decode_contract_message(&message.msg);
+        }
+        "/cosmwasm.wasm.v1.MsgInstantiateContract" => {
+            let message = MsgInstantiateContract::decode(first_message.value.as_slice()).ok()?;
+            tx.sender = message.sender;
+            tx.recipient = format!("code:{}", message.code_id);
+            tx.contract_address = None;
+            if let Some(coin) = message.funds.first() {
+                tx.amount = coin.amount.clone();
+                tx.denom = coin.denom.clone();
+            }
+            tx.function_name = decode_contract_message_name(&message.msg)
+                .or_else(|| Some(format!("instantiate:{}", message.label)));
+            tx.contract_msg = decode_contract_message(&message.msg);
+        }
+        "/cosmwasm.wasm.v1.MsgMigrateContract" => {
+            let message = MsgMigrateContract::decode(first_message.value.as_slice()).ok()?;
+            tx.sender = message.sender;
+            tx.recipient = message.contract.clone();
+            tx.contract_address = Some(message.contract);
+            tx.function_name = decode_contract_message_name(&message.msg)
+                .or_else(|| Some(format!("migrate:{}", message.code_id)));
+            tx.contract_msg = decode_contract_message(&message.msg);
+        }
+        "/cosmwasm.wasm.v1.MsgStoreCode" => {
+            let message = MsgStoreCode::decode(first_message.value.as_slice()).ok()?;
+            tx.sender = message.sender;
+            tx.recipient = "wasm_code_store".to_string();
+            tx.function_name = Some("store_code".to_string());
+        }
+        "/cosmwasm.wasm.v1.MsgUpdateAdmin" => {
+            let message = MsgUpdateAdmin::decode(first_message.value.as_slice()).ok()?;
+            tx.sender = message.sender;
+            tx.recipient = message.contract.clone();
+            tx.contract_address = Some(message.contract);
+            tx.function_name = Some("update_admin".to_string());
+            tx.contract_msg = Some(json!({ "update_admin": { "new_admin": message.new_admin } }));
+        }
+        "/cosmwasm.wasm.v1.MsgClearAdmin" => {
+            let message = MsgClearAdmin::decode(first_message.value.as_slice()).ok()?;
+            tx.sender = message.sender;
+            tx.recipient = message.contract.clone();
+            tx.contract_address = Some(message.contract);
+            tx.function_name = Some("clear_admin".to_string());
+            tx.contract_msg = Some(json!({ "clear_admin": {} }));
+        }
+        "/cosmos.feegrant.v1beta1.MsgGrantAllowance" => {
+            let message = MsgGrantAllowance::decode(first_message.value.as_slice()).ok()?;
+            tx.sender = message.granter;
+            tx.recipient = message.grantee;
+            tx.function_name = Some("grant_allowance".to_string());
+        }
         _ => {}
     }
 
     Some(tx)
+}
+
+fn decode_contract_message_name(msg: &[u8]) -> Option<String> {
+    let value = decode_contract_message(msg)?;
+    value
+        .as_object()
+        .and_then(|object| object.keys().next().cloned())
+}
+
+fn decode_contract_message(msg: &[u8]) -> Option<Value> {
+    let value: Value = serde_json::from_slice(msg).ok()?;
+    Some(value)
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,6 +257,7 @@ struct GuardianTxHint {
     denom: String,
     contract_address: Option<String>,
     function_name: Option<String>,
+    contract_msg: Option<Value>,
     controller_chain: Option<String>,
     message_type: Option<String>,
 }
@@ -191,6 +274,7 @@ mod tests {
             bank::v1beta1::MsgSend,
             tx::v1beta1::{TxBody, TxRaw},
         },
+        cosmwasm::wasm::v1::MsgExecuteContract,
         prost::Name,
     };
     use prost::Message;
@@ -227,5 +311,41 @@ mod tests {
         assert_eq!(parsed.recipient, "init1recipient");
         assert_eq!(parsed.amount, "42");
         assert_eq!(parsed.denom, "uinit");
+    }
+
+    #[test]
+    fn decodes_execute_contract_transactions() {
+        let msg = MsgExecuteContract {
+            sender: "init1sender".to_string(),
+            contract: "init1contract".to_string(),
+            msg: br#"{"swap":{"offer_asset":"uinit"}}"#.to_vec(),
+            funds: vec![cosmrs::proto::cosmos::base::v1beta1::Coin {
+                denom: default_denom(),
+                amount: "1000".to_string(),
+            }],
+        };
+        let any = cosmrs::proto::Any {
+            type_url: "/cosmwasm.wasm.v1.MsgExecuteContract".to_string(),
+            value: msg.encode_to_vec(),
+        };
+        let body = TxBody {
+            messages: vec![any],
+            memo: String::new(),
+            timeout_height: 0,
+            extension_options: vec![],
+            non_critical_extension_options: vec![],
+        };
+        let tx_raw = TxRaw {
+            body_bytes: body.encode_to_vec(),
+            auth_info_bytes: vec![],
+            signatures: vec![],
+        };
+
+        let parsed = decode_protobuf_tx(&tx_raw.encode_to_vec()).expect("tx should decode");
+        assert_eq!(parsed.sender, "init1sender");
+        assert_eq!(parsed.recipient, "init1contract");
+        assert_eq!(parsed.contract_address.as_deref(), Some("init1contract"));
+        assert_eq!(parsed.function_name.as_deref(), Some("swap"));
+        assert_eq!(parsed.amount, "1000");
     }
 }

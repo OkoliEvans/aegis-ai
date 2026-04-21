@@ -60,7 +60,17 @@ pub async fn simulate(lcd: &str, tx_bytes: &[u8]) -> Result<SimulationResult> {
             .unwrap_or_default(),
         balance_deltas: response
             .result
+            .as_ref()
             .map(|result| extract_deltas(&result.events))
+            .unwrap_or_default(),
+        observed_actions: response
+            .result
+            .as_ref()
+            .map(|result| extract_actions(&result.events))
+            .unwrap_or_default(),
+        touched_contracts: response
+            .result
+            .map(|result| extract_contracts(&result.events))
             .unwrap_or_default(),
     })
 }
@@ -123,6 +133,53 @@ fn extract_deltas(events: &[serde_json::Value]) -> Vec<BalanceDelta> {
     }
 
     deltas
+}
+
+fn extract_actions(events: &[serde_json::Value]) -> Vec<String> {
+    let mut actions = Vec::new();
+    for event in events {
+        if let Some(event_type) = event.get("type").and_then(|value| value.as_str()) {
+            if matches!(
+                event_type,
+                "wasm" | "instantiate" | "store_code" | "update_admin" | "clear_admin" | "migrate"
+            ) {
+                actions.push(event_type.to_string());
+            }
+        }
+
+        let attributes = event
+            .get("attributes")
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if let Some(action) = find_attribute(&attributes, "action")
+            .or_else(|| find_attribute(&attributes, "_contract_address"))
+        {
+            actions.push(action);
+        }
+    }
+    actions.sort();
+    actions.dedup();
+    actions
+}
+
+fn extract_contracts(events: &[serde_json::Value]) -> Vec<String> {
+    let mut contracts = Vec::new();
+    for event in events {
+        let attributes = event
+            .get("attributes")
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for key in ["_contract_address", "contract_address"] {
+            if let Some(address) = find_attribute(&attributes, key) {
+                contracts.push(address);
+            }
+        }
+    }
+    contracts.sort();
+    contracts.dedup();
+    contracts
 }
 
 fn find_attribute(attributes: &[serde_json::Value], key: &str) -> Option<String> {

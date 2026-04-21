@@ -1,10 +1,11 @@
-use guardian_analyzer::{anomaly, approvals, contract, ica, llm, poison};
+use guardian_analyzer::{anomaly, approvals, contract, ica, llm, poison, reentrancy};
 use guardian_core::{
-    models::TxPattern, GuardianConfig, GuardianDecision, GuardianRepository, IncomingTx,
-    RiskFinding, Severity,
+    models::TxPattern, GuardianConfig, GuardianDecision, GuardianPolicyClient,
+    GuardianPolicyView, GuardianRepository, IncomingTx, RiskFinding, Severity,
 };
 use guardian_simulator::simulate;
 use std::sync::Arc;
+use tracing::warn;
 
 pub struct GuardianAgent {
     config: GuardianConfig,
@@ -28,6 +29,29 @@ impl GuardianAgent {
             .unwrap_or_default();
         let baseline = self.repository.tx_pattern(&tx.sender).await.ok().flatten();
         let current_height = self.current_height().await;
+        let policy_client = GuardianPolicyClient::from_config(&self.config);
+        let policy = self.fetch_policy(policy_client.as_ref(), &tx.sender).await;
+        let thresholds = DecisionThresholds::from_policy(policy.as_ref());
+        let mut trusted_entities = self.config.known_protocols.clone();
+        if let Some(policy) = policy.as_ref() {
+            trusted_entities.extend(policy.trusted_contracts.iter().cloned());
+            trusted_entities.extend(policy.trusted_recipients.iter().cloned());
+        }
+        if let (Some(client), Some(contract_address)) =
+            (policy_client.as_ref(), tx.contract_address.as_deref())
+        {
+            match client.is_trusted_contract(contract_address).await {
+                Ok(true) => trusted_entities.push(contract_address.to_string()),
+                Ok(false) => {}
+                Err(error) => warn!(
+                    ?error,
+                    contract_address,
+                    "failed to query trusted contract state from guardian-policy"
+                ),
+            }
+        }
+        trusted_entities.sort();
+        trusted_entities.dedup();
 
         let simulation_result = simulate(&self.config.initia_lcd, raw_bytes).await.ok();
         let sim_fund_destination = simulation_result
@@ -52,10 +76,18 @@ impl GuardianAgent {
             }
         }
 
+        if let Some(finding) = approvals::inspect_contract_approval(tx, &trusted_entities) {
+            findings.push(finding);
+        }
+
+        if let Some(finding) = reentrancy::inspect_reentrancy(tx, simulation_result.as_ref()) {
+            findings.push(finding);
+        }
+
         if let Some(msg_type) = tx.message_type.as_deref() {
             if let Some(controller_chain) = tx.controller_chain.as_deref() {
                 if let Some(finding) =
-                    ica::check_ica(msg_type, controller_chain, &self.config.known_protocols)
+                    ica::check_ica(msg_type, controller_chain, &trusted_entities)
                 {
                     findings.push(finding);
                 }
@@ -68,7 +100,8 @@ impl GuardianAgent {
                 contract_address,
                 current_height,
                 sim_fund_destination.as_deref(),
-                &self.config.known_protocols,
+                &trusted_entities,
+                tx.function_name.as_deref(),
             )
             .await
             .ok()
@@ -129,22 +162,47 @@ impl GuardianAgent {
             }
         }
 
-        let fresh_approvals =
-            match approvals::scan_approvals(&self.config.initia_lcd, &tx.sender).await {
-                Ok(approvals) => approvals,
-                Err(_) => self
-                    .repository
-                    .approval_records(&tx.sender)
-                    .await
-                    .unwrap_or_default(),
-            };
-        let _ = self
-            .repository
-            .set_approval_records(&tx.sender, fresh_approvals.clone())
-            .await;
-        for approval in &fresh_approvals {
-            let score =
-                approvals::score_approval(approval, current_height, &self.config.known_protocols);
+        if policy
+            .as_ref()
+            .is_some_and(|entry| entry.auto_block_new_contracts)
+            && tx.contract_address.is_some()
+        {
+            let contract_address = tx.contract_address.as_deref().unwrap_or_default();
+            let is_trusted = trusted_entities.iter().any(|entry| entry == contract_address);
+            let is_verified = contract_risk
+                .as_ref()
+                .map(|risk| risk.is_verified)
+                .unwrap_or(false);
+            if !is_trusted && !is_verified {
+                findings.push(RiskFinding {
+                    module: "policy".to_string(),
+                    severity: Severity::Critical,
+                    weight: thresholds.block.max(85),
+                    description:
+                        "User policy blocks untrusted contract interactions by default".to_string(),
+                    payload: serde_json::json!({
+                        "contract_address": contract_address,
+                        "auto_block_new_contracts": true,
+                        "warn_threshold": thresholds.warn,
+                        "confirm_threshold": thresholds.confirm,
+                        "block_threshold": thresholds.block,
+                    }),
+                });
+            }
+        }
+
+        let mut fresh_approvals = match approvals::scan_approvals(&self.config.initia_lcd, &tx.sender).await {
+            Ok(approvals) => approvals,
+            Err(_) => self
+                .repository
+                .approval_records(&tx.sender)
+                .await
+                .unwrap_or_default(),
+        };
+        let _ = approvals::apply_contract_approval_delta(&mut fresh_approvals, tx, current_height);
+        for approval in &mut fresh_approvals {
+            let score = approvals::score_approval(approval, current_height, &trusted_entities);
+            approval.risk_score = score;
             if score >= 50 {
                 findings.push(RiskFinding {
                     module: "approval".to_string(),
@@ -167,6 +225,10 @@ impl GuardianAgent {
                 });
             }
         }
+        let _ = self
+            .repository
+            .set_approval_records(&tx.sender, fresh_approvals.clone())
+            .await;
 
         if let Some(simulation) = simulation_result {
             if simulation.will_fail {
@@ -199,11 +261,39 @@ impl GuardianAgent {
                     });
                 }
             }
+            if simulation.gas_estimate > 3_000_000 {
+                findings.push(RiskFinding {
+                    module: "simulator".to_string(),
+                    severity: Severity::Medium,
+                    weight: 20,
+                    description: format!(
+                        "Simulation gas estimate is unusually high: {}",
+                        simulation.gas_estimate
+                    ),
+                    payload: serde_json::json!({ "gas_estimate": simulation.gas_estimate }),
+                });
+            }
+            if simulation
+                .observed_actions
+                .iter()
+                .any(|action| matches!(action.as_str(), "migrate" | "update_admin" | "clear_admin"))
+            {
+                findings.push(RiskFinding {
+                    module: "wasm_admin".to_string(),
+                    severity: Severity::High,
+                    weight: 55,
+                    description: "Simulation includes privileged Wasm admin actions".to_string(),
+                    payload: serde_json::json!({
+                        "observed_actions": simulation.observed_actions,
+                        "touched_contracts": simulation.touched_contracts,
+                    }),
+                });
+            }
         }
 
         let mut total: i32 = findings.iter().map(|finding| finding.weight).sum();
 
-        if matches!(total, 0..=29) {
+        if total < thresholds.warn {
             if let Some(mut stored_baseline) = baseline.clone() {
                 anomaly::update_baseline(&mut stored_baseline, tx);
                 let _ = self.repository.upsert_tx_pattern(stored_baseline).await;
@@ -222,7 +312,9 @@ impl GuardianAgent {
             }
         }
 
-        if (35..=65).contains(&total) {
+        let llm_floor = (thresholds.warn + 5).max(15);
+        let llm_ceiling = (thresholds.block - 10).max(llm_floor);
+        if (llm_floor..=llm_ceiling).contains(&total) {
             if let Some(api_key) = self.config.anthropic_api_key.as_deref() {
                 let context = llm::TxContext {
                     sender: tx.sender.clone(),
@@ -248,28 +340,30 @@ impl GuardianAgent {
                         .unwrap_or_default(),
                 };
                 if let Ok(assessment) = llm::llm_assess(&context, api_key).await {
-                    findings.push(RiskFinding {
-                        module: "llm_triage".to_string(),
-                        severity: Severity::Medium,
-                        weight: 10,
-                        description: "LLM triage consulted for ambiguous risk band".to_string(),
-                        payload: serde_json::json!({ "assessment": assessment }),
-                    });
+                    findings.push(llm::triage_finding(&assessment));
                     total = findings.iter().map(|finding| finding.weight).sum();
                 }
             }
         }
 
-        let auto_revoke = findings.iter().any(|finding| finding.module == "approval") && total > 80;
+        Self::classify(findings, total, thresholds)
+    }
 
-        match total {
-            0..=29 => GuardianDecision::Allow,
-            30..=59 => GuardianDecision::Warn { findings },
-            60..=79 => GuardianDecision::Confirm { findings },
-            _ => GuardianDecision::Block {
-                findings,
-                auto_revoke,
-            },
+    async fn fetch_policy(
+        &self,
+        policy_client: Option<&GuardianPolicyClient>,
+        owner: &str,
+    ) -> Option<GuardianPolicyView> {
+        let Some(policy_client) = policy_client else {
+            return None;
+        };
+
+        match policy_client.fetch_policy(owner).await {
+            Ok(policy) => policy,
+            Err(error) => {
+                warn!(?error, owner, "failed to query guardian-policy thresholds");
+                None
+            }
         }
     }
 
@@ -287,6 +381,67 @@ impl GuardianAgent {
                     .unwrap_or_default()
             }
             Err(_) => 0,
+        }
+    }
+
+    fn classify(
+        findings: Vec<RiskFinding>,
+        total: i32,
+        thresholds: DecisionThresholds,
+    ) -> GuardianDecision {
+        let auto_revoke =
+            findings.iter().any(|finding| finding.module == "approval") && total >= thresholds.block;
+
+        if total < thresholds.warn {
+            GuardianDecision::Allow
+        } else if total < thresholds.confirm {
+            GuardianDecision::Warn { findings }
+        } else if total < thresholds.block {
+            GuardianDecision::Confirm { findings }
+        } else {
+            GuardianDecision::Block {
+                findings,
+                auto_revoke,
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DecisionThresholds {
+    warn: i32,
+    confirm: i32,
+    block: i32,
+}
+
+impl DecisionThresholds {
+    fn from_policy(policy: Option<&GuardianPolicyView>) -> Self {
+        let Some(policy) = policy else {
+            return Self::default();
+        };
+
+        let warn = i32::from(policy.warn_threshold);
+        let confirm = i32::from(policy.confirm_threshold);
+        let block = i32::from(policy.block_threshold);
+
+        if warn < confirm && confirm < block {
+            Self {
+                warn,
+                confirm,
+                block,
+            }
+        } else {
+            Self::default()
+        }
+    }
+}
+
+impl Default for DecisionThresholds {
+    fn default() -> Self {
+        Self {
+            warn: 30,
+            confirm: 60,
+            block: 80,
         }
     }
 }
@@ -309,4 +464,152 @@ fn contract_summary(risk: &guardian_analyzer::contract::ContractRisk) -> String 
         parts.push("contract appears upgradeable".to_string());
     }
     parts.join("; ")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use guardian_core::{InMemoryRepository, RiskFinding, Severity};
+
+    use super::{DecisionThresholds, GuardianAgent, GuardianConfig, GuardianDecision};
+
+    fn sample_finding(module: &str, severity: Severity, weight: i32) -> RiskFinding {
+        RiskFinding {
+            module: module.to_string(),
+            severity,
+            weight,
+            description: format!("{module} finding"),
+            payload: serde_json::json!({ "module": module }),
+        }
+    }
+
+    fn test_agent() -> GuardianAgent {
+        GuardianAgent::new(
+            GuardianConfig {
+                app_host: "127.0.0.1".to_string(),
+                app_port: 3000,
+                database_url: None,
+                initia_chain_id: Some("aegis-guard".to_string()),
+                initia_lcd: "http://127.0.0.1:1".to_string(),
+                initia_rpc: "http://127.0.0.1:1".to_string(),
+                initia_ws: "ws://127.0.0.1:1".to_string(),
+                anthropic_api_key: None,
+                smtp_host: None,
+                smtp_port: 587,
+                smtp_username: None,
+                smtp_password: None,
+                smtp_from_email: None,
+                smtp_from_name: None,
+                known_protocols: vec![],
+                guardian_policy_contract_address: None,
+                guardian_policy_reporter_key: None,
+                guardian_policy_keyring_backend: "test".to_string(),
+                guardian_policy_cli: "minitiad".to_string(),
+            },
+            Arc::new(InMemoryRepository::default()),
+        )
+    }
+
+    #[test]
+    fn classify_allows_low_risk_totals() {
+        let decision = GuardianAgent::classify(
+            vec![sample_finding("simulator", Severity::Low, 20)],
+            20,
+            DecisionThresholds::default(),
+        );
+        assert!(matches!(decision, GuardianDecision::Allow));
+    }
+
+    #[test]
+    fn classify_warns_for_mid_band_risk() {
+        let decision = GuardianAgent::classify(
+            vec![sample_finding("approval", Severity::Medium, 45)],
+            45,
+            DecisionThresholds::default(),
+        );
+        match decision {
+            GuardianDecision::Warn { findings } => assert_eq!(findings.len(), 1),
+            other => panic!("expected warn decision, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_requires_confirmation_for_high_risk_without_block() {
+        let decision = GuardianAgent::classify(
+            vec![sample_finding("contract", Severity::High, 70)],
+            70,
+            DecisionThresholds::default(),
+        );
+        match decision {
+            GuardianDecision::Confirm { findings } => assert_eq!(findings[0].module, "contract"),
+            other => panic!("expected confirm decision, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_blocks_and_enables_auto_revoke_for_severe_approval_risk() {
+        let decision = GuardianAgent::classify(
+            vec![
+                sample_finding("approval", Severity::High, 55),
+                sample_finding("contract", Severity::Critical, 35),
+            ],
+            90,
+            DecisionThresholds::default(),
+        );
+        match decision {
+            GuardianDecision::Block {
+                auto_revoke,
+                findings,
+            } => {
+                assert!(auto_revoke);
+                assert_eq!(findings.len(), 2);
+            }
+            other => panic!("expected block decision, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_uses_policy_thresholds_when_present() {
+        let decision = GuardianAgent::classify(
+            vec![sample_finding("policy", Severity::High, 48)],
+            48,
+            DecisionThresholds {
+                warn: 20,
+                confirm: 40,
+                block: 70,
+            },
+        );
+        assert!(matches!(decision, GuardianDecision::Confirm { .. }));
+    }
+
+    #[tokio::test]
+    async fn evaluate_builds_baseline_for_low_risk_transactions() {
+        let agent = test_agent();
+        let tx = guardian_core::IncomingTx {
+            sender: "init1sender".to_string(),
+            recipient: "init1recipient".to_string(),
+            amount: "100".to_string(),
+            denom: "uinit".to_string(),
+            contract_address: None,
+            function_name: None,
+            contract_msg: None,
+            controller_chain: None,
+            message_type: None,
+            raw_bytes: vec![],
+            timestamp: chrono::Utc::now(),
+        };
+
+        let decision = agent.evaluate(&tx, &[]).await;
+        assert!(matches!(decision, GuardianDecision::Allow));
+
+        let baseline = agent
+            .repository()
+            .tx_pattern(&tx.sender)
+            .await
+            .expect("baseline lookup should succeed");
+        let baseline = baseline.expect("baseline should be created");
+        assert_eq!(baseline.address, tx.sender);
+        assert_eq!(baseline.avg_value_uinit, 100);
+    }
 }
