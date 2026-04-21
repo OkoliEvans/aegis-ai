@@ -1,0 +1,33 @@
+{
+  "chain_id": "aegis-guard",
+  "vm": "wasm",
+  "network": "testnet",
+  "l1_chain_id": "initiation-2",
+  "bridge_id": "1840",
+  "gas_denom": "umin",
+  "funding_tx_hash": "1905A67ACE190BA33C8EE392EB7BCF025641F5A640115754DEA2320C207E4084",
+  "endpoints": {
+    "rest": "http://localhost:1317",
+    "rpc": "http://localhost:26657",
+    "rpc_ws": "ws://localhost:26657/websocket",
+    "grpc": "http://localhost:9090",
+    "indexer": "http://localhost:8088"
+  },
+  "explorer": {
+    "custom_network_link": "https://scan.testnet.initia.xyz/custom-network/add/link?config=eyJ2bSI6Indhc20iLCJjaGFpbklkIjoiYWVnaXMtZ3VhcmQiLCJtaW5HYXNQcmljZSI6MCwiZGVub20iOiJ1bWluIiwibGNkIjoiaHR0cDovL2xvY2FsaG9zdDoxMzE3IiwicnBjIjoiaHR0cDovL2xvY2FsaG9zdDoyNjY1NyJ9",
+    "funding_tx_hash": "1905A67ACE190BA33C8EE392EB7BCF025641F5A640115754DEA2320C207E4084"
+  },
+  "contracts": {
+    "guardian_policy": {
+      "source_path": "contracts/guardian-policy",
+      "status": "deployed",
+      "code_id": "3",
+      "contract_address": "init1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3sfl43fx",
+      "instantiate_tx_hash": "612904D41F148FAFF05A05A6D9C45D1132768E0A153988364FE115227ECD4BCF"
+    }
+  },
+  "notes": [
+    "This file stores safe public deployment metadata only.",
+    "Do not copy mnemonics or private material from ~/.minitia/artifacts/config.json into the repo."
+  ]
+}

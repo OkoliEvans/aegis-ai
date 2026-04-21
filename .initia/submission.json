@@ -1,0 +1,25 @@
+{
+  "project_name": "Guardian",
+  "track": "agents",
+  "vm": "wasm",
+  "repository_url": "https://github.com/OkoliEvans/aegis-ai",
+  "deployment": {
+    "rollup_chain_id": "aegis-guard",
+    "deployment_link": "https://scan.testnet.initia.xyz/custom-network/add/link?config=eyJ2bSI6Indhc20iLCJjaGFpbklkIjoiYWVnaXMtZ3VhcmQiLCJtaW5HYXNQcmljZSI6MCwiZGVub20iOiJ1bWluIiwibGNkIjoiaHR0cDovL2xvY2FsaG9zdDoxMzE3IiwicnBjIjoiaHR0cDovL2xvY2FsaG9zdDoyNjY1NyJ9",
+    "transaction_link": "https://scan.testnet.initia.xyz/tx/1905A67ACE190BA33C8EE392EB7BCF025641F5A640115754DEA2320C207E4084",
+    "contract_deployment": {
+      "code_id": "3",
+      "contract_address": "init1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3sfl43fx",
+      "instantiate_tx_hash": "612904D41F148FAFF05A05A6D9C45D1132768E0A153988364FE115227ECD4BCF"
+    }
+  },
+  "frontend": {
+    "framework": "react-vite",
+    "wallet_integration": "@initia/interwovenkit-react",
+    "native_feature": "interwoven_bridge"
+  },
+  "artifacts": {
+    "readme": "README.md",
+    "demo_video": "TBD_ADD_VIDEO_LINK"
+  }
+}

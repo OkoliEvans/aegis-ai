@@ -21,7 +21,6 @@ skills-lock.json
 node_modules/
 dist/
 .turbo/
-.initia/
 initia/
 miniwasm/
 
