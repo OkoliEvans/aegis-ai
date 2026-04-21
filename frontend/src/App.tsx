@@ -271,6 +271,7 @@ function describeEventLabel(eventType: string) {
     poison: "Address Poisoning",
     dust: "Dust Attack",
     approval: "Stale Approval",
+    approval_review: "Approval Review",
     approval_intent: "Approval Intent",
     anomaly: "Behavioral Anomaly",
     ica: "ICA Abuse",
@@ -1879,7 +1880,7 @@ export default function App() {
                       <p>{entry.address}</p>
                     </div>
                     <div className="entity-tags">
-                      {entry.is_simulation_target ? <span className="inline-pill">Simulation Target</span> : null}
+                      {entry.is_simulation_target ? <span className="inline-pill">Target Wallet</span> : null}
                       <span className={`risk-badge risk-badge--${entry.is_poisoned ? "block" : "clear"}`}>
                         {entry.is_poisoned ? "Poisoned" : "Tracked"}
                       </span>

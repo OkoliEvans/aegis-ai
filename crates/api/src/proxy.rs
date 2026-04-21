@@ -10,6 +10,7 @@ use cosmrs::proto::cosmwasm::wasm::v1::{
     MsgUpdateAdmin,
 };
 use guardian_core::{GuardianDecision, IncomingTx};
+use guardian_notifier::GuardedTxOutcome;
 use prost::Message;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -38,11 +39,39 @@ pub async fn proxy_handler(State(state): State<AppState>, body: Bytes) -> Json<V
     match decision {
         GuardianDecision::Allow => forward_to_node(&state.config.initia_rpc, &body).await,
         GuardianDecision::Warn { findings } => {
-            state.notifier.fire(&tx.sender, &findings, None).await;
+            state
+                .notifier
+                .notify_guarded_transaction(&tx, &findings, None, GuardedTxOutcome::Warned)
+                .await;
             forward_to_node(&state.config.initia_rpc, &body).await
         }
-        GuardianDecision::Confirm { findings } | GuardianDecision::Block { findings, .. } => {
-            state.notifier.fire(&tx.sender, &findings, None).await;
+        GuardianDecision::Confirm { findings } => {
+            state
+                .notifier
+                .notify_guarded_transaction(
+                    &tx,
+                    &findings,
+                    None,
+                    GuardedTxOutcome::ConfirmationRequired,
+                )
+                .await;
+            Json(json!({
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32000,
+                    "message": "Transaction blocked by Guardian",
+                    "data": {
+                        "findings": findings,
+                        "dashboard": format!("http://{}:{}", state.config.app_host, state.config.app_port)
+                    }
+                }
+            }))
+        }
+        GuardianDecision::Block { findings, .. } => {
+            state
+                .notifier
+                .notify_guarded_transaction(&tx, &findings, None, GuardedTxOutcome::Blocked)
+                .await;
             Json(json!({
                 "jsonrpc": "2.0",
                 "error": {

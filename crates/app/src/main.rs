@@ -6,7 +6,9 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use guardian_agent::GuardianAgent;
 use guardian_analyzer::dust;
 use guardian_api::{build_router, AppState};
-use guardian_core::{build_repository, GuardianConfig};
+use guardian_core::{
+    build_repository, models::ApprovalRecord, GuardianConfig, RiskFinding, Severity,
+};
 use guardian_monitor::stream_events;
 use guardian_notifier::Notifier;
 use tokio::sync::mpsc;
@@ -81,13 +83,19 @@ async fn main() -> Result<()> {
             let findings = dust::detect_dust_events(&event, &watched_addresses, &known_protocols);
             for (owner, finding) in findings {
                 notifier
-                    .fire(&owner, &[finding], Some(&event.tx_hash))
+                    .notify_security_update(
+                        &owner,
+                        &[finding],
+                        Some(&event.tx_hash),
+                        "Dust monitoring",
+                    )
                     .await;
             }
         }
     });
 
     let repository = state.repository.clone();
+    let notifier = state.notifier.clone();
     let config_for_scanner = config.clone();
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(APPROVAL_SCAN_INTERVAL_SECS));
@@ -169,6 +177,10 @@ async fn main() -> Result<()> {
                 }
 
                 if !flagged.is_empty() {
+                    let summary = approval_review_finding(&watched.address, &approvals, &flagged);
+                    notifier
+                        .notify_approval_review(&watched.address, &[summary], None, flagged.len())
+                        .await;
                     info!(
                         address = %watched.address,
                         flagged_approvals = flagged.len(),
@@ -181,6 +193,58 @@ async fn main() -> Result<()> {
 
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn approval_review_finding(
+    owner: &str,
+    approvals: &[ApprovalRecord],
+    flagged: &[(String, i32)],
+) -> RiskFinding {
+    let highest_score = flagged
+        .iter()
+        .map(|(_, score)| *score)
+        .max()
+        .unwrap_or_default();
+    let leading = flagged
+        .first()
+        .map(|(spender, _)| spender.as_str())
+        .unwrap_or("unknown");
+    let flagged_details = approvals
+        .iter()
+        .filter(|approval| approval.risk_score >= 50)
+        .take(5)
+        .map(|approval| {
+            serde_json::json!({
+                "spender": approval.spender,
+                "score": approval.risk_score,
+                "amount": approval.amount,
+                "token_denom": approval.token_denom,
+                "contract_address": approval.contract_address,
+                "approval_type": approval.approval_type,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    RiskFinding {
+        module: "approval_review".to_string(),
+        severity: if highest_score >= 80 {
+            Severity::High
+        } else {
+            Severity::Medium
+        },
+        weight: highest_score,
+        description: format!(
+            "Guardian found {} approval{} that should be reviewed, led by spender {}",
+            flagged.len(),
+            if flagged.len() == 1 { "" } else { "s" },
+            leading
+        ),
+        payload: serde_json::json!({
+            "owner": owner,
+            "flagged_approvals": flagged_details,
+            "count": flagged.len(),
+        }),
+    }
 }
 
 async fn current_height(rpc_url: &str) -> i64 {

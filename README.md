@@ -1,6 +1,6 @@
 # Aegis Guard
 
-Aegis Guard is an Initia wallet protection stack that screens outbound transactions before broadcast, evaluates risk across multiple detectors, records incidents onchain through a Guardian policy contract, and exposes the full protection history in a React dashboard.
+Aegis Guard is an Initia wallet protection Agent that screens outbound transactions before broadcast, evaluates risk across multiple detectors, records incidents onchain through a Guardian policy contract, and exposes the full protection history in a  dashboard.
 
 ## Core Flow
 
@@ -50,6 +50,7 @@ pnpm dev
 Backend/runtime values:
 
 - `DATABASE_URL`: Postgres connection used by Diesel
+- `ANTHROPIC_API_KEY`: optional today for analyzer paths; later this can also power richer narrative email summaries beyond the current deterministic templates
 - `INITIA_CHAIN_ID`, `INITIA_LCD`, `INITIA_RPC`, `INITIA_WS`: Initia or local rollup endpoints
 - `GUARDIAN_POLICY_CONTRACT_ADDRESS`: deployed `guardian-policy` contract address
 - `GUARDIAN_POLICY_REPORTER_KEY`: local key name allowed to write incidents/quarantines onchain
@@ -64,6 +65,12 @@ Frontend values:
 - `VITE_DEMO_RISK_LAB_CONTRACT_ADDRESS`: optional demo contract address for the guarded-call walkthrough
 
 Restart the Vite dev server after changing `VITE_*` values.
+
+## Alert Emails
+
+- If a wallet owner adds an email address in the dashboard, Guardian now sends professional alert emails for simulations, guarded transaction blocks or warnings, scheduled approval reviews, and live security updates such as dust detections.
+- The current email content is template-based and derived directly from the findings so it is stable for demos and MVP use.
+- Later, once the LLM path is enabled with `ANTHROPIC_API_KEY`, these emails can be upgraded with richer narrative summaries and remediation guidance.
 
 ## Useful Commands
 

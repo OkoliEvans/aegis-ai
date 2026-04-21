@@ -297,7 +297,7 @@ pub async fn send_test_email(
 
     state
         .notifier
-        .fire(&payload.address, &[finding], None)
+        .send_test_email_alert(&payload.address, &[finding])
         .await;
 
     Ok(Json(ApiStatus {
@@ -328,7 +328,13 @@ pub async fn run_simulation(
     let tx_tag = format!("simulation:{}", scenario.id);
     state
         .notifier
-        .publish(&payload.address, &scenario.findings, Some(tx_tag.as_str()))
+        .notify_simulation_report(
+            &payload.address,
+            &scenario.findings,
+            Some(tx_tag.as_str()),
+            scenario.id,
+            scenario.attack_surface,
+        )
         .await;
 
     Ok(Json(RunSimulationResponse {
