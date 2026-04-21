@@ -1238,7 +1238,6 @@ export default function App() {
               <span className={`status-blinker status-blinker--${apiStatus}`} aria-hidden="true" />
               <strong>{describeApiStatus(apiStatus)}</strong>
             </div>
-            <p>{guardedRpcEndpoint}</p>
           </div>
         </div>
       </aside>
