@@ -78,6 +78,11 @@ struct EmailContent {
     subject: String,
     title: String,
     eyebrow: String,
+    status_label: String,
+    status_background: &'static str,
+    status_border: &'static str,
+    status_color: &'static str,
+    status_glow: &'static str,
     summary: String,
     metadata: Vec<(String, String)>,
     findings_label: String,
@@ -394,7 +399,19 @@ fn compose_email_content(
         metadata.push(("Reference".to_string(), hash.to_string()));
     }
 
-    let (subject, eyebrow, title, summary, findings_label, next_steps) = match context {
+    let (
+        subject,
+        eyebrow,
+        status_label,
+        status_background,
+        status_border,
+        status_color,
+        status_glow,
+        title,
+        summary,
+        findings_label,
+        next_steps,
+    ) = match context {
         AlertContext::GuardedTransaction { outcome, tx } => {
             metadata.push((
                 "Operation".to_string(),
@@ -420,6 +437,11 @@ fn compose_email_content(
                     title_case(&primary.module)
                 ),
                 "Aegis Guard Transaction Review".to_string(),
+                outcome.header_badge().to_string(),
+                outcome.header_background(),
+                outcome.header_border(),
+                outcome.header_color(),
+                outcome.header_glow(),
                 outcome.email_title().to_string(),
                 outcome.summary_sentence().to_string(),
                 "Why Guardian raised this transaction".to_string(),
@@ -441,6 +463,11 @@ fn compose_email_content(
                     humanize_label(scenario_id)
                 ),
                 "Aegis Guard Analysis Report".to_string(),
+                "ANALYSIS REPORT".to_string(),
+                "rgba(45, 212, 191, 0.16)",
+                "rgba(45, 212, 191, 0.38)",
+                "#76ffed",
+                "0 0 16px rgba(45,212,191,0.38)",
                 "Simulation report is ready".to_string(),
                 "Guardian completed the requested analysis run and published the report to the dashboard and audit history."
                     .to_string(),
@@ -469,6 +496,11 @@ fn compose_email_content(
                     if *flagged_approvals == 1 { "" } else { "s" }
                 ),
                 "Aegis Guard Approval Review".to_string(),
+                "APPROVAL REVIEW".to_string(),
+                "rgba(251, 191, 36, 0.14)",
+                "rgba(251, 191, 36, 0.34)",
+                "#ffd76a",
+                "0 0 16px rgba(251,191,36,0.34)",
                 "Outstanding approvals need review".to_string(),
                 "Guardian completed a scheduled approval review and found permissions that should be narrowed or revoked."
                     .to_string(),
@@ -492,6 +524,11 @@ fn compose_email_content(
                     title_case(&primary.module)
                 ),
                 "Aegis Guard Security Update".to_string(),
+                "SECURITY UPDATE".to_string(),
+                "rgba(96, 165, 250, 0.14)",
+                "rgba(96, 165, 250, 0.32)",
+                "#8ec5ff",
+                "0 0 16px rgba(96,165,250,0.34)",
                 "New wallet activity requires review".to_string(),
                 "Guardian detected activity worth reviewing and recorded the result in the protection history."
                     .to_string(),
@@ -512,6 +549,11 @@ fn compose_email_content(
             (
                 "[Guardian][Email Test] Alert delivery confirmed".to_string(),
                 "Aegis Guard Email Test".to_string(),
+                "EMAIL TEST".to_string(),
+                "rgba(45, 212, 191, 0.14)",
+                "rgba(45, 212, 191, 0.32)",
+                "#76ffed",
+                "0 0 16px rgba(45,212,191,0.32)",
                 "Email alerts are configured correctly".to_string(),
                 "This message confirms that Guardian can deliver professional security updates to the address configured for this wallet."
                     .to_string(),
@@ -544,6 +586,11 @@ fn compose_email_content(
         subject,
         title,
         eyebrow,
+        status_label,
+        status_background,
+        status_border,
+        status_color,
+        status_glow,
         summary,
         metadata,
         findings_label,
@@ -618,10 +665,11 @@ fn render_html_email(content: &EmailContent) -> String {
         "<!doctype html><html><body style=\"margin:0;background:#eef2f7;font-family:Arial,sans-serif;color:#101828\">\
          <div style=\"max-width:700px;margin:24px auto;padding:0 16px\">\
          <div style=\"background:#ffffff;border:1px solid #d0d5dd;border-radius:18px;overflow:hidden;box-shadow:0 18px 42px rgba(15,23,42,0.08)\">\
-         <div style=\"padding:28px 32px;background:linear-gradient(135deg,#0f172a,#12263f);color:#ffffff\">\
-         <p style=\"margin:0 0 10px 0;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#a7f3d0\">{}</p>\
-         <h1 style=\"margin:0;font-size:28px;line-height:1.2;color:#ffffff\">{}</h1>\
-         <p style=\"margin:14px 0 0 0;font-size:15px;line-height:1.7;color:#dbe7f3\">{}</p>\
+         <div style=\"padding:28px 32px;background:radial-gradient(circle at top right,rgba(36,242,209,0.22),transparent 34%),linear-gradient(135deg,#07111f,#0f1e33 54%,#0a2a3c);color:#ffffff;border-bottom:1px solid rgba(92,242,214,0.18)\">\
+         <p style=\"display:inline-block;margin:0 0 12px 0;padding:6px 12px;border-radius:999px;background:rgba(92,242,214,0.14);border:1px solid rgba(92,242,214,0.34);font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#72ffe8;font-weight:700;text-shadow:0 0 14px rgba(92,242,214,0.55)\">{}</p>\
+         <h1 style=\"margin:0;font-size:28px;line-height:1.2;color:#ffffff;text-shadow:0 0 18px rgba(126,250,255,0.18)\">{}</h1>\
+         <p style=\"display:inline-block;margin:12px 0 0 0;padding:7px 12px;border-radius:999px;background:{};border:1px solid {};font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:{};font-weight:800;box-shadow:{}\">{}</p>\
+         <p style=\"margin:14px 0 0 0;font-size:15px;line-height:1.7;color:#8df7ff;font-weight:600;text-shadow:0 0 16px rgba(92,242,214,0.28)\">{}</p>\
          </div>\
          <div style=\"padding:28px 32px\">\
          <div style=\"padding:18px 20px;background:#f8fafc;border:1px solid #e4e7ec;border-radius:14px\">\
@@ -640,6 +688,11 @@ fn render_html_email(content: &EmailContent) -> String {
          </div></div></div></body></html>",
         escape_html(&content.eyebrow),
         escape_html(&content.title),
+        content.status_background,
+        content.status_border,
+        content.status_color,
+        content.status_glow,
+        escape_html(&content.status_label),
         escape_html(&content.summary),
         metadata_rows,
         escape_html(&content.findings_label),
@@ -753,6 +806,46 @@ impl GuardedTxOutcome {
             ],
         }
     }
+
+    fn header_badge(self) -> &'static str {
+        match self {
+            Self::Warned => "REVIEW REQUIRED",
+            Self::ConfirmationRequired => "CONFIRMATION REQUIRED",
+            Self::Blocked => "BLOCKED BEFORE BROADCAST",
+        }
+    }
+
+    fn header_background(self) -> &'static str {
+        match self {
+            Self::Warned => "rgba(251, 191, 36, 0.14)",
+            Self::ConfirmationRequired => "rgba(249, 115, 22, 0.14)",
+            Self::Blocked => "rgba(248, 113, 113, 0.16)",
+        }
+    }
+
+    fn header_border(self) -> &'static str {
+        match self {
+            Self::Warned => "rgba(251, 191, 36, 0.34)",
+            Self::ConfirmationRequired => "rgba(249, 115, 22, 0.36)",
+            Self::Blocked => "rgba(248, 113, 113, 0.38)",
+        }
+    }
+
+    fn header_color(self) -> &'static str {
+        match self {
+            Self::Warned => "#ffd76a",
+            Self::ConfirmationRequired => "#ffb86c",
+            Self::Blocked => "#ff8f8f",
+        }
+    }
+
+    fn header_glow(self) -> &'static str {
+        match self {
+            Self::Warned => "0 0 16px rgba(251,191,36,0.34)",
+            Self::ConfirmationRequired => "0 0 16px rgba(249,115,22,0.34)",
+            Self::Blocked => "0 0 18px rgba(248,113,113,0.38)",
+        }
+    }
 }
 
 fn escape_html(input: &str) -> String {
@@ -818,6 +911,7 @@ mod tests {
             .iter()
             .any(|(label, value)| label == "Outcome" && value == "Blocked before broadcast"));
         assert!(render_text_email(&content).contains("Recommended next steps"));
+        assert!(render_html_email(&content).contains("BLOCKED BEFORE BROADCAST"));
     }
 
     #[test]
@@ -839,5 +933,6 @@ mod tests {
             .iter()
             .any(|(label, _)| label == "Scenario"));
         assert!(render_html_email(&content).contains("Simulation report is ready"));
+        assert!(render_html_email(&content).contains("ANALYSIS REPORT"));
     }
 }
