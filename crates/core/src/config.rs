@@ -104,7 +104,9 @@ impl GuardianConfig {
             database_url: env::var("DATABASE_URL").ok().filter(|v| !v.is_empty()),
             initia_chain_id: env_or_fallback(
                 "INITIA_CHAIN_ID",
-                local_rollup.as_ref().and_then(|metadata| metadata.chain_id.as_deref()),
+                local_rollup
+                    .as_ref()
+                    .and_then(|metadata| metadata.chain_id.as_deref()),
             ),
             initia_lcd: env_or_fallback(
                 "INITIA_LCD",

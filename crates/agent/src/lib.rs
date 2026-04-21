@@ -1,7 +1,7 @@
 use guardian_analyzer::{anomaly, approvals, contract, ica, llm, poison, reentrancy};
 use guardian_core::{
-    models::TxPattern, GuardianConfig, GuardianDecision, GuardianPolicyClient,
-    GuardianPolicyView, GuardianRepository, IncomingTx, RiskFinding, Severity,
+    models::TxPattern, GuardianConfig, GuardianDecision, GuardianPolicyClient, GuardianPolicyView,
+    GuardianRepository, IncomingTx, RiskFinding, Severity,
 };
 use guardian_simulator::simulate;
 use std::sync::Arc;
@@ -45,8 +45,7 @@ impl GuardianAgent {
                 Ok(false) => {}
                 Err(error) => warn!(
                     ?error,
-                    contract_address,
-                    "failed to query trusted contract state from guardian-policy"
+                    contract_address, "failed to query trusted contract state from guardian-policy"
                 ),
             }
         }
@@ -86,8 +85,7 @@ impl GuardianAgent {
 
         if let Some(msg_type) = tx.message_type.as_deref() {
             if let Some(controller_chain) = tx.controller_chain.as_deref() {
-                if let Some(finding) =
-                    ica::check_ica(msg_type, controller_chain, &trusted_entities)
+                if let Some(finding) = ica::check_ica(msg_type, controller_chain, &trusted_entities)
                 {
                     findings.push(finding);
                 }
@@ -168,7 +166,9 @@ impl GuardianAgent {
             && tx.contract_address.is_some()
         {
             let contract_address = tx.contract_address.as_deref().unwrap_or_default();
-            let is_trusted = trusted_entities.iter().any(|entry| entry == contract_address);
+            let is_trusted = trusted_entities
+                .iter()
+                .any(|entry| entry == contract_address);
             let is_verified = contract_risk
                 .as_ref()
                 .map(|risk| risk.is_verified)
@@ -178,8 +178,8 @@ impl GuardianAgent {
                     module: "policy".to_string(),
                     severity: Severity::Critical,
                     weight: thresholds.block.max(85),
-                    description:
-                        "User policy blocks untrusted contract interactions by default".to_string(),
+                    description: "User policy blocks untrusted contract interactions by default"
+                        .to_string(),
                     payload: serde_json::json!({
                         "contract_address": contract_address,
                         "auto_block_new_contracts": true,
@@ -191,14 +191,15 @@ impl GuardianAgent {
             }
         }
 
-        let mut fresh_approvals = match approvals::scan_approvals(&self.config.initia_lcd, &tx.sender).await {
-            Ok(approvals) => approvals,
-            Err(_) => self
-                .repository
-                .approval_records(&tx.sender)
-                .await
-                .unwrap_or_default(),
-        };
+        let mut fresh_approvals =
+            match approvals::scan_approvals(&self.config.initia_lcd, &tx.sender).await {
+                Ok(approvals) => approvals,
+                Err(_) => self
+                    .repository
+                    .approval_records(&tx.sender)
+                    .await
+                    .unwrap_or_default(),
+            };
         let _ = approvals::apply_contract_approval_delta(&mut fresh_approvals, tx, current_height);
         for approval in &mut fresh_approvals {
             let score = approvals::score_approval(approval, current_height, &trusted_entities);
@@ -389,8 +390,8 @@ impl GuardianAgent {
         total: i32,
         thresholds: DecisionThresholds,
     ) -> GuardianDecision {
-        let auto_revoke =
-            findings.iter().any(|finding| finding.module == "approval") && total >= thresholds.block;
+        let auto_revoke = findings.iter().any(|finding| finding.module == "approval")
+            && total >= thresholds.block;
 
         if total < thresholds.warn {
             GuardianDecision::Allow

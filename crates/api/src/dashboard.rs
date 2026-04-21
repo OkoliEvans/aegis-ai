@@ -47,18 +47,16 @@ pub async fn list_approvals(
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if params.refresh.unwrap_or(false) {
-        let approvals = match guardian_analyzer::approvals::scan_approvals(
-            &state.config.initia_lcd,
-            &owner,
-        )
-        .await
-        {
-            Ok(approvals) => approvals,
-            Err(error) if guardian_analyzer::approvals::scan_is_unavailable(&error) => {
-                return Ok(Json(stored));
-            }
-            Err(_) => return Err(axum::http::StatusCode::BAD_GATEWAY),
-        };
+        let approvals =
+            match guardian_analyzer::approvals::scan_approvals(&state.config.initia_lcd, &owner)
+                .await
+            {
+                Ok(approvals) => approvals,
+                Err(error) if guardian_analyzer::approvals::scan_is_unavailable(&error) => {
+                    return Ok(Json(stored));
+                }
+                Err(_) => return Err(axum::http::StatusCode::BAD_GATEWAY),
+            };
         state
             .repository
             .set_approval_records(&owner, approvals.clone())
@@ -71,7 +69,12 @@ pub async fn list_approvals(
         return Ok(Json(stored));
     }
 
-    let approvals = match guardian_analyzer::approvals::scan_approvals(&state.config.initia_lcd, &owner).await {
+    let approvals = match guardian_analyzer::approvals::scan_approvals(
+        &state.config.initia_lcd,
+        &owner,
+    )
+    .await
+    {
         Ok(approvals) => approvals,
         Err(error) if guardian_analyzer::approvals::scan_is_unavailable(&error) => Vec::new(),
         Err(_) => return Err(axum::http::StatusCode::BAD_GATEWAY),
@@ -95,7 +98,10 @@ pub async fn revoke_approval_plan(
         .await
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if let Some(approval) = stored.iter().find(|approval| approval.spender == payload.spender) {
+    if let Some(approval) = stored
+        .iter()
+        .find(|approval| approval.spender == payload.spender)
+    {
         let messages = approval
             .revoke_messages
             .as_array()
@@ -194,7 +200,9 @@ pub async fn get_policy_overview(
             policy: None,
             incidents: Vec::new(),
             quarantined: Vec::new(),
-            issues: vec!["Set GUARDIAN_POLICY_CONTRACT_ADDRESS to enable onchain policy state.".to_string()],
+            issues: vec![
+                "Set GUARDIAN_POLICY_CONTRACT_ADDRESS to enable onchain policy state.".to_string(),
+            ],
         }));
     };
 

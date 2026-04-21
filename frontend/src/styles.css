@@ -1013,6 +1013,13 @@ ol {
   align-items: center;
 }
 
+.policy-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .panel-pagination {
   justify-content: flex-end;
   margin-top: 16px;
@@ -1069,6 +1076,13 @@ ol {
 
 .simulation-summary {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.policy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
 }
 
 .summary-chip strong,
@@ -1249,6 +1263,7 @@ ol {
   .rpc-grid,
   .stat-row,
   .simulation-summary,
+  .policy-grid,
   .pipeline-grid,
   .threat-grid {
     grid-template-columns: 1fr;

@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use guardian_core::{models::ApprovalRecord, IncomingTx, RiskFinding, Severity};
 use reqwest::Client;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use uuid::Uuid;
-use reqwest::StatusCode;
 
 #[derive(Debug, Deserialize)]
 struct MoveResource {
@@ -52,16 +52,13 @@ pub fn score_approval(
     if approval.amount == u128::MAX.to_string() || approval.amount.eq_ignore_ascii_case("all") {
         score += 40;
     }
-    if !known_protocols
-        .iter()
-        .any(|protocol| {
-            protocol == &approval.spender
-                || approval
-                    .contract_address
-                    .as_ref()
-                    .is_some_and(|contract| protocol == contract)
-        })
-    {
+    if !known_protocols.iter().any(|protocol| {
+        protocol == &approval.spender
+            || approval
+                .contract_address
+                .as_ref()
+                .is_some_and(|contract| protocol == contract)
+    }) {
         score += 30;
     }
     if approval.approval_type.as_deref() == Some("cw721_all") {
@@ -216,9 +213,9 @@ pub fn apply_contract_approval_delta(
             approvals.retain(|entry| {
                 !(entry.spender == spender
                     && entry.contract_address.as_deref() == Some(contract_address.as_str())
-                    && approval_type.as_deref().map_or(true, |kind| {
-                        entry.approval_type.as_deref() == Some(kind)
-                    }))
+                    && approval_type
+                        .as_deref()
+                        .map_or(true, |kind| entry.approval_type.as_deref() == Some(kind)))
             });
             before != approvals.len()
         }
@@ -414,7 +411,11 @@ fn parse_contract_approval_delta(tx: &IncomingTx, current_height: i64) -> Option
     }
 }
 
-fn exec_contract_message(sender: &str, contract: &str, msg_json: serde_json::Value) -> serde_json::Value {
+fn exec_contract_message(
+    sender: &str,
+    contract: &str,
+    msg_json: serde_json::Value,
+) -> serde_json::Value {
     serde_json::json!({
         "typeUrl": "/cosmwasm.wasm.v1.MsgExecuteContract",
         "value": {

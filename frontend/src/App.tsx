@@ -51,6 +51,47 @@ type UserProfile = {
   simulation_target?: WatchedAddress | null;
 };
 
+type PolicyView = {
+  owner: string;
+  warn_threshold: number;
+  confirm_threshold: number;
+  block_threshold: number;
+  trusted_contracts: string[];
+  trusted_recipients: string[];
+  auto_block_new_contracts: boolean;
+  updated_at: number;
+};
+
+type PolicyIncident = {
+  id: number;
+  owner: string;
+  reporter: string;
+  event_type: string;
+  severity: string;
+  tx_hash?: string | null;
+  summary: string;
+  details_json: string;
+  created_at: number;
+};
+
+type PolicyQuarantineEntry = {
+  owner: string;
+  address: string;
+  reason: string;
+  risk_score: number;
+  quarantined_at: number;
+};
+
+type PolicyOverview = {
+  configured: boolean;
+  contract_address?: string | null;
+  reporting_enabled: boolean;
+  policy?: PolicyView | null;
+  incidents: PolicyIncident[];
+  quarantined: PolicyQuarantineEntry[];
+  issues: string[];
+};
+
 type RevokeApprovalPlan = {
   summary: string;
   messages: Array<{
@@ -188,6 +229,7 @@ const sidebarGroups = [
     label: "Protect",
     items: [
       { id: "simulation", label: "Simulation Lab" },
+      { id: "policy", label: "Policy" },
       { id: "approvals", label: "Approvals" },
       { id: "registry", label: "Address Registry" }
     ]
@@ -330,6 +372,11 @@ function formatAbsoluteTime(value: string) {
   return new Date(value).toLocaleString();
 }
 
+function formatPolicyTimestamp(value: number) {
+  const normalized = value > 1_000_000_000_000 ? value : value * 1000;
+  return new Date(normalized).toLocaleString();
+}
+
 function formatRelativeTime(value: string) {
   const then = new Date(value).getTime();
   const diffSeconds = Math.round((then - Date.now()) / 1000);
@@ -371,6 +418,7 @@ export default function App() {
   const [alertEmail, setAlertEmail] = useState("");
   const [alertEmailName, setAlertEmailName] = useState("");
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [policyOverview, setPolicyOverview] = useState<PolicyOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [approvalAction, setApprovalAction] = useState<string | null>(null);
@@ -435,10 +483,30 @@ export default function App() {
     () => riskEvents.slice(historyPage * PAGE_SIZE, (historyPage + 1) * PAGE_SIZE),
     [historyPage, riskEvents]
   );
-  const protectedTargetAddress =
-    profile?.simulation_target?.address || initiaAddress;
-  const protectedTargetLabel =
-    profile?.simulation_target?.label || "Protected wallet";
+  const protectedTargetAddress = profile?.simulation_target?.address || initiaAddress;
+  const protectedTargetLabel = profile?.simulation_target?.label || "Protected wallet";
+  const policyView = policyOverview?.policy ?? null;
+  const policyTrustedEntries = useMemo(() => {
+    if (!policyView) return [];
+
+    return [
+      ...policyView.trusted_contracts.map((value) => ({ kind: "Contract", value })),
+      ...policyView.trusted_recipients.map((value) => ({ kind: "Recipient", value }))
+    ];
+  }, [policyView]);
+  const policyStatusLabel = useMemo(() => {
+    if (!policyOverview?.configured) return "Not configured";
+    if (!policyOverview.reporting_enabled) return "Read-only";
+    return "Reporting live";
+  }, [policyOverview]);
+  const recentPolicyIncidents = useMemo(
+    () => policyOverview?.incidents.slice(0, 3) ?? [],
+    [policyOverview]
+  );
+  const recentQuarantines = useMemo(
+    () => policyOverview?.quarantined.slice(0, 3) ?? [],
+    [policyOverview]
+  );
   const demoDecisionFindings = useMemo(
     () => (demoPreview ? extractDecisionFindings(demoPreview.decision) : []),
     [demoPreview]
@@ -496,8 +564,16 @@ export default function App() {
       });
     }
 
+    if (policyOverview?.issues.length) {
+      items.push({
+        title: "Policy state needs attention",
+        detail: policyOverview.issues[0],
+        tone: "warn"
+      });
+    }
+
     return items;
-  }, [apiStatus, error]);
+  }, [apiStatus, error, policyOverview]);
 
   const protectionState = useMemo<SphereState>(() => {
     if (apiStatus === "offline") return "offline";
@@ -569,6 +645,7 @@ export default function App() {
       setRiskEvents([]);
       setWatchedAddresses([]);
       setProfile(null);
+      setPolicyOverview(null);
       setSimulationRun(null);
       return;
     }
@@ -653,29 +730,38 @@ export default function App() {
     setError(null);
 
     try {
-      const [approvalResponse, riskResponse, watchedResponse, profileResponse] =
+      const [approvalResponse, riskResponse, watchedResponse, profileResponse, policyResponse] =
         await Promise.all([
           fetch(`${apiBase}/api/approvals/${address}?refresh=${refreshApprovals}`),
           fetch(`${apiBase}/api/risk-events/${address}?limit=100`),
           fetch(`${apiBase}/api/watched-addresses/${address}`),
-          fetch(`${apiBase}/api/profile/${address}`)
+          fetch(`${apiBase}/api/profile/${address}`),
+          fetch(`${apiBase}/api/policy/${address}`)
         ]);
 
-      if (!approvalResponse.ok || !riskResponse.ok || !watchedResponse.ok || !profileResponse.ok) {
+      if (
+        !approvalResponse.ok ||
+        !riskResponse.ok ||
+        !watchedResponse.ok ||
+        !profileResponse.ok ||
+        !policyResponse.ok
+      ) {
         throw new Error("Failed to load dashboard data");
       }
 
-      const [approvalData, riskData, watchedData, profileData] = await Promise.all([
+      const [approvalData, riskData, watchedData, profileData, policyData] = await Promise.all([
         approvalResponse.json(),
         riskResponse.json(),
         watchedResponse.json(),
-        profileResponse.json()
+        profileResponse.json(),
+        policyResponse.json()
       ]);
 
       setApprovals(approvalData);
       setRiskEvents(riskData);
       setWatchedAddresses(watchedData);
       setProfile(profileData);
+      setPolicyOverview(policyData);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unknown dashboard error");
     } finally {
@@ -1314,6 +1400,160 @@ export default function App() {
                 </div>
               )}
             </div>
+          </section>
+
+          <section id="policy" className="panel panel-wide" data-section>
+            <div className="panel-header">
+              <div>
+                <span className="section-kicker">Onchain Policy</span>
+                <h2>Policy controls and incident registry</h2>
+              </div>
+              <span className="panel-meta">{policyStatusLabel}</span>
+            </div>
+
+            {policyOverview?.configured ? (
+              <>
+                <div className="simulation-summary">
+                  <article className="summary-chip">
+                    <span className="label">Contract</span>
+                    <strong>
+                      {policyOverview.contract_address
+                        ? shortenAddress(policyOverview.contract_address)
+                        : "Unavailable"}
+                    </strong>
+                  </article>
+                  <article className="summary-chip">
+                    <span className="label">Reporting</span>
+                    <strong>{policyOverview.reporting_enabled ? "Enabled" : "Read-only"}</strong>
+                  </article>
+                  <article className="summary-chip">
+                    <span className="label">Incidents</span>
+                    <strong>{policyOverview.incidents.length}</strong>
+                  </article>
+                  <article className="summary-chip">
+                    <span className="label">Quarantines</span>
+                    <strong>{policyOverview.quarantined.length}</strong>
+                  </article>
+                </div>
+
+                <div className="policy-grid">
+                  <article className="detail-card">
+                    <strong>Wallet thresholds</strong>
+                    {policyView ? (
+                      <>
+                        <p>
+                          Guardian uses these onchain thresholds when deciding when to warn,
+                          require confirmation, or block this wallet&apos;s activity.
+                        </p>
+                        <div className="policy-pill-row">
+                          <span className="inline-pill">Warn {policyView.warn_threshold}+</span>
+                          <span className="inline-pill">Confirm {policyView.confirm_threshold}+</span>
+                          <span className="inline-pill">Block {policyView.block_threshold}+</span>
+                          {policyView.auto_block_new_contracts ? (
+                            <span className="inline-pill">Auto-block new contracts</span>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : (
+                      <p>
+                        No wallet-specific policy has been stored onchain yet. Guardian is using the
+                        service defaults until this wallet saves a custom policy.
+                      </p>
+                    )}
+                  </article>
+
+                  <article className="detail-card">
+                    <strong>Trust registry</strong>
+                    <p>
+                      {policyTrustedEntries.length
+                        ? `${policyTrustedEntries.length} trusted contract or recipient entr${policyTrustedEntries.length === 1 ? "y" : "ies"} recorded onchain.`
+                        : "No trusted contracts or recipients are stored for this wallet yet."}
+                    </p>
+                    {policyTrustedEntries.length ? (
+                      <div className="policy-pill-row">
+                        {policyTrustedEntries.slice(0, 6).map((entry) => (
+                          <span className="inline-pill" key={`${entry.kind}-${entry.value}`}>
+                            {entry.kind} {shortenAddress(entry.value)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                </div>
+
+                <div className="policy-grid">
+                  <article className="detail-card">
+                    <strong>Recent onchain incidents</strong>
+                    <div className="entity-stack">
+                      {recentPolicyIncidents.length ? (
+                        recentPolicyIncidents.map((incident) => {
+                          const tone = riskToneFromSeverity(incident.severity);
+
+                          return (
+                            <article className="entity-row" key={`incident-${incident.id}`}>
+                              <div>
+                                <strong>{describeEventLabel(incident.event_type)}</strong>
+                                <p>{incident.summary}</p>
+                              </div>
+                              <div className="entity-tags">
+                                <span className={`risk-badge risk-badge--${tone}`}>{riskLabel(tone)}</span>
+                                <span className="inline-pill">{formatPolicyTimestamp(incident.created_at)}</span>
+                              </div>
+                            </article>
+                          );
+                        })
+                      ) : (
+                        <div className="empty-card">
+                          <strong>No onchain incidents yet</strong>
+                          <p>Run a simulation or trigger a blocked action to populate the registry.</p>
+                        </div>
+                      )}
+                    </div>
+                  </article>
+
+                  <article className="detail-card">
+                    <strong>Quarantined addresses</strong>
+                    <div className="entity-stack">
+                      {recentQuarantines.length ? (
+                        recentQuarantines.map((entry) => {
+                          const tone = riskToneFromScore(entry.risk_score);
+
+                          return (
+                            <article
+                              className="entity-row"
+                              key={`quarantine-${entry.address}-${entry.quarantined_at}`}
+                            >
+                              <div>
+                                <strong>{shortenAddress(entry.address)}</strong>
+                                <p>{entry.reason}</p>
+                              </div>
+                              <div className="entity-tags">
+                                <span className={`risk-badge risk-badge--${tone}`}>{riskLabel(tone)}</span>
+                                <span className="inline-pill">{formatPolicyTimestamp(entry.quarantined_at)}</span>
+                              </div>
+                            </article>
+                          );
+                        })
+                      ) : (
+                        <div className="empty-card">
+                          <strong>No quarantine entries yet</strong>
+                          <p>Guardian will write risky counterparties here when blocks or critical findings occur.</p>
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                </div>
+              </>
+            ) : (
+              <div className="empty-card">
+                <strong>Onchain policy is not configured yet</strong>
+                <p>
+                  Set `GUARDIAN_POLICY_CONTRACT_ADDRESS` on the backend and
+                  `VITE_GUARDIAN_POLICY_CONTRACT_ADDRESS` on the frontend to expose the policy
+                  registry and sync incidents onchain.
+                </p>
+              </div>
+            )}
           </section>
 
           <section id="simulation" className="panel panel-wide" data-section>

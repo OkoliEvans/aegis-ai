@@ -1,41 +1,43 @@
-# Guardian
+# Aegis Guard
 
-Guardian is an AI-assisted wallet protection appchain project built on Initia protocol. It combines a Rust backend that intercepts and evaluates transactions with a Wasm-appchain-facing frontend built with `@initia/interwovenkit-react`.
+Aegis Guard is an Initia wallet protection stack that screens outbound transactions before broadcast, evaluates risk across multiple detectors, records incidents onchain through a Guardian policy contract, and exposes the full protection history in a React dashboard.
 
-## What It Does
+## Core Flow
 
-- Screens transactions before forwarding them upstream
-- Flags address poisoning, stale approvals, anomalies, and suspicious contracts
-- Streams risk events to a dashboard in real time
-- Lets users register watched addresses and then get Telegram messages when a transaction is flagged as high risk explaining the reason for blocking the transaction and the kind of attack identified.
-- Uses an Initia-native feature through Interwoven Bridge support in the frontend
+- Wallet traffic is routed through the Guardian RPC proxy.
+- The backend evaluates approvals, poisoning, suspicious contracts, reentrancy patterns, ICA actions, and behavioral anomalies.
+- Guardian allows, warns, requires confirmation, or blocks.
+- Findings are stored in Postgres, streamed to the dashboard, and synced to the onchain `guardian-policy` contract as incidents and quarantine entries.
 
-## Architecture
+## Workspace Layout
 
 - `crates/app`: backend entrypoint and migration command
-- `crates/api`: RPC proxy, SSE feed, and dashboard APIs
-- `crates/agent`: orchestration and decision engine
-- `crates/analyzer`: threat detection modules
-- `crates/simulator`: transaction simulation integration
-- `crates/core`: shared types, config, and repository layer
-- `contracts/guardian-policy`: CosmWasm policy, quarantine, and incident registry contract
-- `frontend`: InterwovenKit frontend for the Guardian dashboard
+- `crates/api`: dashboard APIs, SSE feed, and guarded RPC proxy
+- `crates/agent`: decision engine and analyzer orchestration
+- `crates/analyzer`: threat detectors
+- `crates/core`: shared config, Diesel models, policy client, and repository layer
+- `crates/notifier`: persistence, alert fanout, and onchain policy sync
+- `contracts/guardian-policy`: onchain policy, incident, and quarantine registry
+- `contracts/guardian-risk-lab`: safe demo contract for blocked contract-call walkthroughs
+- `frontend`: protected dashboard built with `@initia/interwovenkit-react`
+- `simulations`: reusable attack scenarios for drills and demo runs
 
-## Backend Commands
+## Quick Start
+
+1. Copy `.env.example` into `.env` and fill in the values you want to run locally.
+2. Run Diesel migrations:
 
 ```bash
-cargo run -p guardian-app -- migrate
+diesel migration run
+```
+
+3. Start the backend:
+
+```bash
 cargo run -p guardian-app
 ```
 
-## Contract Commands
-
-```bash
-cd contracts/guardian-policy
-cargo test
-```
-
-## Frontend Commands
+4. Start the frontend:
 
 ```bash
 cd frontend
@@ -43,37 +45,36 @@ pnpm install
 pnpm dev
 ```
 
-## Hackathon Requirements
+## Environment Notes
 
-- Track: Agents
-- Deployment target: Initia appchain / rollup using the Wasm VM
-- Wallet UX: `@initia/interwovenkit-react`
-- Initia-native feature: Interwoven Bridge
+Backend/runtime values:
 
-## Initia-Native Feature
+- `DATABASE_URL`: Postgres connection used by Diesel
+- `INITIA_CHAIN_ID`, `INITIA_LCD`, `INITIA_RPC`, `INITIA_WS`: Initia or local rollup endpoints
+- `GUARDIAN_POLICY_CONTRACT_ADDRESS`: deployed `guardian-policy` contract address
+- `GUARDIAN_POLICY_REPORTER_KEY`: local key name allowed to write incidents/quarantines onchain
+- `GUARDIAN_POLICY_KEYRING_BACKEND`: usually `test` for local development
+- `GUARDIAN_POLICY_CLI`: optional explicit path to `minitiad`
 
-Guardian implements Initia's Interwoven Bridge flow through `@initia/interwovenkit-react`.
+Frontend values:
 
-- The frontend mounts `InterwovenKitProvider` with the local custom appchain in [frontend/src/main.tsx](/Users/MAC/Rust/aegis_guard/frontend/src/main.tsx).
-- The dashboard uses `useInterwovenKit()` and calls `openBridge()` in [frontend/src/App.tsx](/Users/MAC/Rust/aegis_guard/frontend/src/App.tsx).
-- The current bridge invocation opens the Initia-native bridge with:
-  - `srcChainId = initiation-2`
-  - `srcDenom = uinit`
+- `VITE_API_BASE_URL`: dashboard/backend origin
+- `VITE_GUARDIAN_RPC`: RPC endpoint wallets should use for screened broadcasts
+- `VITE_GUARDIAN_POLICY_CONTRACT_ADDRESS`: surfaced in the UI
+- `VITE_DEMO_RISK_LAB_CONTRACT_ADDRESS`: optional demo contract address for the guarded-call walkthrough
 
-This satisfies the hackathon requirement to implement at least one Initia-native feature.
+Restart the Vite dev server after changing `VITE_*` values.
 
-## Deployment Evidence
+## Useful Commands
 
-The final submission must include the deployed rollup evidence below:
+```bash
+cargo test --workspace
+cargo check --workspace
+cd frontend && pnpm build
+```
 
-- Rollup chain ID: `aegis-guard`
-- Deployment link: `https://scan.testnet.initia.xyz/custom-network/add/link?config=eyJ2bSI6Indhc20iLCJjaGFpbklkIjoiYWVnaXMtZ3VhcmQiLCJtaW5HYXNQcmljZSI6MCwiZGVub20iOiJ1bWluIiwibGNkIjoiaHR0cDovL2xvY2FsaG9zdDoxMzE3IiwicnBjIjoiaHR0cDovL2xvY2FsaG9zdDoyNjY1NyJ9`
-- L1 funding transaction: `1905A67ACE190BA33C8EE392EB7BCF025641F5A640115754DEA2320C207E4084`
-- Demo video: `TBD_ADD_VIDEO_LINK`
+## Demo Paths
 
-## Notes
-
-- The repo now includes safe local rollup metadata at `.initia/local-rollup.json`.
-- The frontend and backend defaults in `.env.example` target the local `aegis-guard` Wasm rollup.
-- The appchain-native contract layer now lives in `contracts/guardian-policy`; it stores user policy thresholds, trusted contracts, quarantined addresses, authorized reporters, and incident history.
-- `VITE_GUARDIAN_POLICY_CONTRACT_ADDRESS` remains a placeholder until the Guardian policy contract is stored and instantiated on `aegis-guard`.
+- Use `Run Simulation` in the dashboard to publish a full safety drill.
+- Use `Attempt Demo Contract Call` to show Guardian blocking a suspicious contract interaction before broadcast.
+- Review `Activity Feed`, `Protection history`, and `Onchain Policy` to show local persistence plus onchain incident/quarantine sync.
