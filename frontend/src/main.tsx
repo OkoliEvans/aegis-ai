@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createConfig, http, WagmiProvider } from "wagmi";
 import { mainnet } from "wagmi/chains";
 import {
+  initiaPrivyWalletConnector,
   injectStyles,
   InterwovenKitProvider,
   TESTNET
@@ -19,6 +20,7 @@ injectStyles(InterwovenKitStyles);
 
 const queryClient = new QueryClient();
 const wagmiConfig = createConfig({
+  connectors: [initiaPrivyWalletConnector],
   chains: [mainnet],
   transports: {
     [mainnet.id]: http()

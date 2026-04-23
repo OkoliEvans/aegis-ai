@@ -7,20 +7,24 @@ use axum::{
     Json,
 };
 use futures_util::StreamExt;
+use guardian_analyzer::{contract, liquidity};
 use guardian_core::{
     models::{ApprovalRecord, RegisteredUser, StoredRiskEvent, WatchedAddress},
     GuardianDecision, GuardianPolicyClient, GuardianPolicyIncident, GuardianPolicyView,
-    GuardianQuarantineEntry, IncomingTx, RiskFinding, Severity,
+    GuardianQuarantineEntry, IncomingTx, RiskFinding, Severity, SimulationResult,
+    SwapExecutionInsight,
 };
 use guardian_simulations::{
     address_poisoning_scenario, all_scenarios, anomaly_attack_scenario, approval_attack_scenario,
-    dust_attack_scenario, ica_attack_scenario, reentrancy_pattern_scenario,
-    simulated_contract_abuse_scenario, ScenarioResult,
+    dust_attack_scenario, high_slippage_scenario, ica_attack_scenario, low_liquidity_scenario,
+    reentrancy_pattern_scenario, simulated_contract_abuse_scenario, ScenarioResult,
 };
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::AppState;
+
+type PreviewApiResult<T> = Result<Json<T>, (StatusCode, Json<ApiErrorResponse>)>;
 
 pub async fn sse_feed(
     State(state): State<AppState>,
@@ -353,10 +357,35 @@ pub async fn run_simulation(
 pub async fn preview_risk_lab_contract(
     State(state): State<AppState>,
     Json(payload): Json<PreviewRiskLabRequest>,
-) -> Result<Json<PreviewRiskLabResponse>, StatusCode> {
+) -> PreviewApiResult<PreviewRiskLabResponse> {
     let contract_address = payload.contract_address.trim();
     if contract_address.is_empty() {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "Contract address is required for analysis.",
+        ));
+    }
+    validate_analysis_network(payload.analysis_network, contract_address)
+        .map_err(|(status, message)| api_error(status, message))?;
+
+    if payload.analysis_mode.unwrap_or(PreviewAnalysisMode::Inspect)
+        == PreviewAnalysisMode::Inspect
+    {
+        let findings =
+            inspect_contract_findings(&state, contract_address, None, payload.analysis_network)
+                .await
+                .map_err(|(status, message)| api_error(status, message))?;
+
+        return Ok(Json(PreviewRiskLabResponse {
+            contract_address: contract_address.to_string(),
+            decision: classify_preview_findings(findings),
+            execute_message: serde_json::json!({
+                "inspect_contract": {
+                    "target": contract_address,
+                    "mode": "read_only"
+                }
+            }),
+        }));
     }
 
     let execute_message = serde_json::json!({
@@ -389,6 +418,259 @@ pub async fn preview_risk_lab_contract(
     }))
 }
 
+pub async fn preview_liquidity_contract(
+    State(state): State<AppState>,
+    Json(payload): Json<PreviewRiskLabRequest>,
+) -> PreviewApiResult<PreviewRiskLabResponse> {
+    let contract_address = payload.contract_address.trim();
+    if contract_address.is_empty() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "Contract address is required for liquidity analysis.",
+        ));
+    }
+    validate_analysis_network(payload.analysis_network, contract_address)
+        .map_err(|(status, message)| api_error(status, message))?;
+
+    if payload.analysis_mode.unwrap_or(PreviewAnalysisMode::Inspect)
+        == PreviewAnalysisMode::Inspect
+    {
+        let findings = inspect_contract_findings(
+            &state,
+            contract_address,
+            Some("swap"),
+            payload.analysis_network,
+        )
+        .await
+        .map_err(|(status, message)| api_error(status, message))?;
+
+        return Ok(Json(PreviewRiskLabResponse {
+            contract_address: contract_address.to_string(),
+            decision: classify_preview_findings(findings),
+            execute_message: serde_json::json!({
+                "inspect_contract": {
+                    "target": contract_address,
+                    "mode": "read_only"
+                }
+            }),
+        }));
+    }
+
+    let execute_message = serde_json::json!({
+        "swap": {
+            "offer_asset": {
+                "amount": payload.amount.clone().unwrap_or_else(|| "1200000".to_string()),
+                "info": { "native_token": { "denom": payload.denom.clone().unwrap_or_else(|| "umin".to_string()) } }
+            },
+            "belief_price": "0.98"
+        }
+    });
+
+    let tx = IncomingTx {
+        sender: payload.address.clone(),
+        recipient: contract_address.to_string(),
+        amount: payload.amount.unwrap_or_else(|| "1200000".to_string()),
+        denom: payload.denom.unwrap_or_else(|| "umin".to_string()),
+        contract_address: Some(contract_address.to_string()),
+        function_name: Some("swap".to_string()),
+        contract_msg: Some(execute_message.clone()),
+        controller_chain: None,
+        message_type: Some("/cosmwasm.wasm.v1.MsgExecuteContract".to_string()),
+        raw_bytes: vec![],
+        timestamp: chrono::Utc::now(),
+    };
+
+    let simulation = SimulationResult {
+        will_fail: false,
+        fail_reason: None,
+        gas_estimate: 240_000,
+        balance_deltas: vec![],
+        observed_actions: vec!["swap".to_string(), "route_thin_pool".to_string()],
+        touched_contracts: vec![contract_address.to_string()],
+        swap_execution: Some(SwapExecutionInsight {
+            offered_amount: Some(tx.amount.parse().unwrap_or(1_200_000)),
+            return_amount: Some(2_040_000),
+            spread_amount: Some(150_000),
+            commission_amount: Some(4_200),
+            offer_pool: Some(11_000_000),
+            ask_pool: Some(20_000_000),
+        }),
+    };
+
+    let mut findings = liquidity::inspect_liquidity(&tx, Some(&simulation))
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    if let Ok(risk) = contract::score_contract(
+        &state.config.initia_lcd,
+        state.config.initia_json_rpc.as_deref(),
+        contract_address,
+        0,
+        None,
+        &state.config.known_protocols,
+        tx.function_name.as_deref(),
+    )
+    .await
+    {
+        if risk.score >= 50 {
+            findings.push(RiskFinding {
+                module: "contract".to_string(),
+                severity: if risk.score >= 80 {
+                    Severity::Critical
+                } else {
+                    Severity::High
+                },
+                weight: risk.score,
+                description: format!(
+                    "Contract risk score {}/100; verified: {}; unexpected flow: {}",
+                    risk.score, risk.is_verified, risk.unexpected_flow
+                ),
+                payload: serde_json::to_value(risk).unwrap_or_else(|_| serde_json::json!({})),
+            });
+        }
+    }
+
+    findings.push(RiskFinding {
+        module: "simulator".to_string(),
+        severity: Severity::High,
+        weight: 50,
+        description: "Synthetic swap preview shows thin liquidity and elevated execution loss risk"
+            .to_string(),
+        payload: serde_json::json!({
+            "contract_address": contract_address,
+            "price_impact_ratio": 0.0685,
+            "pool_share_ratio": 0.1091,
+        }),
+    });
+
+    let decision = classify_preview_findings(findings);
+
+    Ok(Json(PreviewRiskLabResponse {
+        contract_address: contract_address.to_string(),
+        decision,
+        execute_message,
+    }))
+}
+
+async fn inspect_contract_findings(
+    state: &AppState,
+    contract_address: &str,
+    called_function: Option<&str>,
+    analysis_network: Option<PreviewAnalysisNetwork>,
+) -> Result<Vec<RiskFinding>, (StatusCode, String)> {
+    let selected_json_rpc = selected_evm_rpc(state, analysis_network, contract_address)
+        .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
+    let risk = contract::score_contract(
+        &state.config.initia_lcd,
+        selected_json_rpc.as_deref(),
+        contract_address,
+        0,
+        None,
+        &state.config.known_protocols,
+        called_function,
+    )
+    .await
+    .map_err(map_contract_analysis_error)?;
+
+    let mut findings = Vec::new();
+    if risk.score >= 50 {
+        findings.push(RiskFinding {
+            module: "contract".to_string(),
+            severity: if risk.score >= 80 {
+                Severity::Critical
+            } else {
+                Severity::High
+            },
+            weight: risk.score,
+            description: if risk.score >= 80 {
+                "Bytecode and metadata signals indicate critical contract risk".to_string()
+            } else {
+                "Contract metadata suggests elevated operational risk and manual review is recommended"
+                    .to_string()
+            },
+            payload: serde_json::to_value(risk).unwrap_or_else(|_| serde_json::json!({})),
+        });
+    }
+
+    Ok(findings)
+}
+
+fn map_contract_analysis_error(error: impl std::fmt::Display) -> (StatusCode, String) {
+    let message = error.to_string();
+    if message.contains("MiniEVM JSON-RPC not configured")
+        || message.contains("no deployed runtime bytecode")
+        || message.contains("no modules found for contract")
+    {
+        return (StatusCode::BAD_REQUEST, message);
+    }
+
+    (StatusCode::BAD_GATEWAY, format!("Contract analysis failed: {message}"))
+}
+
+fn api_error(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<ApiErrorResponse>) {
+    (
+        status,
+        Json(ApiErrorResponse {
+            error: message.into(),
+        }),
+    )
+}
+
+fn selected_evm_rpc(
+    state: &AppState,
+    analysis_network: Option<PreviewAnalysisNetwork>,
+    contract_address: &str,
+) -> Result<Option<String>, String> {
+    if !contract_address.starts_with("0x") {
+        return Ok(None);
+    }
+
+    match analysis_network.unwrap_or(PreviewAnalysisNetwork::Auto) {
+        PreviewAnalysisNetwork::Auto | PreviewAnalysisNetwork::InitiaMinievm => state
+            .config
+            .initia_json_rpc
+            .clone()
+            .ok_or_else(|| {
+                "Initia MiniEVM JSON-RPC is not configured. Set INITIA_JSON_RPC to analyze Initia 0x... contracts."
+                    .to_string()
+            })
+            .map(Some),
+        PreviewAnalysisNetwork::Sepolia => state
+            .config
+            .sepolia_json_rpc
+            .clone()
+            .ok_or_else(|| {
+                "Sepolia JSON-RPC is not configured. Set SEPOLIA_JSON_RPC to analyze Sepolia 0x... contracts."
+                    .to_string()
+            })
+            .map(Some),
+        PreviewAnalysisNetwork::WasmMove => Ok(None),
+    }
+}
+
+fn validate_analysis_network(
+    network: Option<PreviewAnalysisNetwork>,
+    contract_address: &str,
+) -> Result<(), (StatusCode, String)> {
+    let is_evm = contract_address.starts_with("0x");
+    match network.unwrap_or(PreviewAnalysisNetwork::Auto) {
+        PreviewAnalysisNetwork::Auto => Ok(()),
+        PreviewAnalysisNetwork::InitiaMinievm if !is_evm => Err((
+            StatusCode::BAD_REQUEST,
+            "Initia MiniEVM analysis expects a 0x... contract address.".to_string(),
+        )),
+        PreviewAnalysisNetwork::Sepolia if !is_evm => Err((
+            StatusCode::BAD_REQUEST,
+            "Sepolia analysis expects a 0x... contract address.".to_string(),
+        )),
+        PreviewAnalysisNetwork::WasmMove if is_evm => Err((
+            StatusCode::BAD_REQUEST,
+            "Guardian Wasm/Move analysis expects an init1... contract address.".to_string(),
+        )),
+        _ => Ok(()),
+    }
+}
+
 fn select_scenario(id: &str) -> Option<ScenarioResult> {
     match id {
         "address_poisoning" => Some(address_poisoning_scenario()),
@@ -396,9 +678,29 @@ fn select_scenario(id: &str) -> Option<ScenarioResult> {
         "approval_attack" => Some(approval_attack_scenario()),
         "behavioral_anomaly" => Some(anomaly_attack_scenario()),
         "ica_abuse" => Some(ica_attack_scenario()),
+        "low_liquidity" => Some(low_liquidity_scenario()),
+        "high_slippage" => Some(high_slippage_scenario()),
         "simulated_contract_abuse" => Some(simulated_contract_abuse_scenario()),
         "reentrancy_pattern" => Some(reentrancy_pattern_scenario()),
         _ => None,
+    }
+}
+
+fn classify_preview_findings(findings: Vec<RiskFinding>) -> GuardianDecision {
+    let total = findings.iter().map(|finding| finding.weight).sum::<i32>();
+    let auto_revoke = findings.iter().any(|finding| finding.module == "approval") && total >= 80;
+
+    if total < 30 {
+        GuardianDecision::Allow
+    } else if total < 60 {
+        GuardianDecision::Warn { findings }
+    } else if total < 80 {
+        GuardianDecision::Confirm { findings }
+    } else {
+        GuardianDecision::Block {
+            findings,
+            auto_revoke,
+        }
     }
 }
 
@@ -488,12 +790,30 @@ pub struct RunSimulationRequest {
     pub scenario_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewAnalysisMode {
+    Demo,
+    Inspect,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewAnalysisNetwork {
+    Auto,
+    WasmMove,
+    InitiaMinievm,
+    Sepolia,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PreviewRiskLabRequest {
     pub address: String,
     pub contract_address: String,
     pub amount: Option<String>,
     pub denom: Option<String>,
+    pub analysis_mode: Option<PreviewAnalysisMode>,
+    pub analysis_network: Option<PreviewAnalysisNetwork>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -545,6 +865,11 @@ pub struct PreviewRiskLabResponse {
     pub contract_address: String,
     pub decision: GuardianDecision,
     pub execute_message: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApiErrorResponse {
+    pub error: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

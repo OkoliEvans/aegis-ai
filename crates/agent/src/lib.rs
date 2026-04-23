@@ -1,4 +1,6 @@
-use guardian_analyzer::{anomaly, approvals, contract, ica, llm, poison, reentrancy};
+use guardian_analyzer::{
+    anomaly, approvals, contract, ica, liquidity, llm, poison, reentrancy, slippage,
+};
 use guardian_core::{
     models::TxPattern, GuardianConfig, GuardianDecision, GuardianPolicyClient, GuardianPolicyView,
     GuardianRepository, IncomingTx, RiskFinding, Severity,
@@ -79,6 +81,14 @@ impl GuardianAgent {
             findings.push(finding);
         }
 
+        if let Some(finding) = slippage::inspect_slippage(tx) {
+            findings.push(finding);
+        }
+
+        if let Some(finding) = liquidity::inspect_liquidity(tx, simulation_result.as_ref()) {
+            findings.push(finding);
+        }
+
         if let Some(finding) = reentrancy::inspect_reentrancy(tx, simulation_result.as_ref()) {
             findings.push(finding);
         }
@@ -95,6 +105,7 @@ impl GuardianAgent {
         let contract_risk = if let Some(contract_address) = tx.contract_address.as_deref() {
             contract::score_contract(
                 &self.config.initia_lcd,
+                self.config.initia_json_rpc.as_deref(),
                 contract_address,
                 current_height,
                 sim_fund_destination.as_deref(),
@@ -127,6 +138,7 @@ impl GuardianAgent {
                     if let Some(contract_address) = tx.contract_address.as_deref() {
                         if let Ok(bytecode) = contract::fetch_module_bytecode_pub(
                             &self.config.initia_lcd,
+                            self.config.initia_json_rpc.as_deref(),
                             contract_address,
                         )
                         .await
@@ -495,6 +507,8 @@ mod tests {
                 initia_lcd: "http://127.0.0.1:1".to_string(),
                 initia_rpc: "http://127.0.0.1:1".to_string(),
                 initia_ws: "ws://127.0.0.1:1".to_string(),
+                initia_json_rpc: None,
+                sepolia_json_rpc: None,
                 anthropic_api_key: None,
                 smtp_host: None,
                 smtp_port: 587,

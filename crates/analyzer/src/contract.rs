@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ pub struct ContractRisk {
     pub suspicious_opcodes: Vec<String>,
     pub unexpected_flow: bool,
     pub drain_fn_names: Vec<String>,
+    pub analysis_backend: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +44,17 @@ struct RawSource {
 }
 
 const DANGEROUS_OPCODES: &[(&str, &[u8])] = &[("SELFDESTRUCT", &[0xff]), ("DELEGATECALL", &[0xf4])];
+const EVM_UPGRADE_SELECTORS: &[(&str, [u8; 4])] = &[
+    ("UPGRADE_TO", [0x36, 0x59, 0xcf, 0xe6]),
+    ("UPGRADE_TO_AND_CALL", [0x4f, 0x1e, 0xf2, 0x86]),
+    ("IMPLEMENTATION", [0x5c, 0x60, 0xda, 0x1b]),
+    ("ADMIN", [0xf8, 0x51, 0xa4, 0x40]),
+    ("CHANGE_ADMIN", [0x8f, 0x28, 0x39, 0x70]),
+];
+const EVM_DRAIN_SELECTORS: &[(&str, [u8; 4])] = &[
+    ("WITHDRAW_UINT256", [0x2e, 0x1a, 0x7d, 0x4d]),
+    ("WITHDRAW", [0x3c, 0xcf, 0xd6, 0x0b]),
+];
 
 const UPGRADE_SIGNATURES: &[&str] = &["upgradeTo", "upgradeToAndCall", "implementation"];
 const DRAIN_NAME_HINTS: &[&str] = &[
@@ -58,12 +70,28 @@ const SUSPICIOUS_LABEL_HINTS: &[&str] = &["test", "drain", "rug", "exploit", "ad
 
 pub async fn score_contract(
     lcd: &str,
+    json_rpc: Option<&str>,
     module_addr: &str,
     current_height: i64,
     sim_fund_destination: Option<&str>,
     known_protocols: &[String],
     called_function: Option<&str>,
 ) -> Result<ContractRisk> {
+    if is_evm_address(module_addr) {
+        let json_rpc = json_rpc.context(
+            "MiniEVM JSON-RPC not configured. Set INITIA_JSON_RPC (backend) to enable 0x contract analysis.",
+        )?;
+
+        return score_evm_contract(
+            json_rpc,
+            module_addr,
+            sim_fund_destination,
+            known_protocols,
+            called_function,
+        )
+        .await;
+    }
+
     if let Ok(risk) = score_wasm_contract(
         lcd,
         module_addr,
@@ -157,10 +185,22 @@ pub async fn score_contract(
         suspicious_opcodes,
         unexpected_flow,
         drain_fn_names,
+        analysis_backend: "move".to_string(),
     })
 }
 
-pub async fn fetch_module_bytecode_pub(lcd: &str, addr: &str) -> Result<Vec<u8>> {
+pub async fn fetch_module_bytecode_pub(
+    lcd: &str,
+    json_rpc: Option<&str>,
+    addr: &str,
+) -> Result<Vec<u8>> {
+    if is_evm_address(addr) {
+        let json_rpc = json_rpc.context(
+            "MiniEVM JSON-RPC not configured. Set INITIA_JSON_RPC (backend) to enable 0x contract analysis.",
+        )?;
+        return fetch_evm_code_bytes(json_rpc, addr).await;
+    }
+
     if let Ok(contract_info) = fetch_wasm_contract_info(lcd, addr).await {
         return fetch_wasm_code_bytes(
             lcd,
@@ -213,11 +253,49 @@ fn check_verified(addr: &str, known_protocols: &[String]) -> bool {
     known_protocols.iter().any(|protocol| protocol == addr)
 }
 
+fn is_evm_address(addr: &str) -> bool {
+    let trimmed = addr.trim();
+    trimmed.len() == 42
+        && trimmed.starts_with("0x")
+        && trimmed
+            .as_bytes()
+            .iter()
+            .skip(2)
+            .all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn contains_sequence(haystack: &[u8], needle: &[u8]) -> bool {
     !needle.is_empty()
         && haystack
             .windows(needle.len())
             .any(|window| window == needle)
+}
+
+fn selector_hits(bytecode: &[u8], selectors: &[(&str, [u8; 4])]) -> Vec<String> {
+    selectors
+        .iter()
+        .filter(|(_, selector)| contains_sequence(bytecode, selector))
+        .map(|(name, _)| (*name).to_string())
+        .collect()
+}
+
+fn decode_hex_bytes(value: &str) -> Result<Vec<u8>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
+    if value.len() % 2 != 0 {
+        bail!("hex payload has an odd length");
+    }
+
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for index in (0..value.len()).step_by(2) {
+        let byte = u8::from_str_radix(&value[index..index + 2], 16)
+            .context("failed to decode hex byte")?;
+        bytes.push(byte);
+    }
+
+    Ok(bytes)
 }
 
 #[derive(Debug, Deserialize)]
@@ -308,6 +386,100 @@ async fn score_wasm_contract(
         suspicious_opcodes,
         unexpected_flow,
         drain_fn_names,
+        analysis_backend: "wasm".to_string(),
+    })
+}
+
+async fn score_evm_contract(
+    json_rpc: &str,
+    contract_addr: &str,
+    sim_fund_destination: Option<&str>,
+    known_protocols: &[String],
+    called_function: Option<&str>,
+) -> Result<ContractRisk> {
+    let bytecode = fetch_evm_code_bytes(json_rpc, contract_addr).await?;
+    let is_verified = check_verified(contract_addr, known_protocols);
+    let unexpected_flow = sim_fund_destination
+        .map(|destination| {
+            destination != contract_addr
+                && !known_protocols
+                    .iter()
+                    .any(|protocol| protocol == destination)
+        })
+        .unwrap_or(false);
+
+    let upgrade_hits = selector_hits(&bytecode, EVM_UPGRADE_SELECTORS);
+    let selector_drains = selector_hits(&bytecode, EVM_DRAIN_SELECTORS);
+    let has_call = contains_sequence(&bytecode, &[0xf1]);
+    let has_delegatecall = contains_sequence(&bytecode, &[0xf4]);
+    let has_selfdestruct = contains_sequence(&bytecode, &[0xff]);
+
+    let is_upgradeable = !upgrade_hits.is_empty() || has_delegatecall;
+
+    let mut suspicious_opcodes = Vec::new();
+    if has_selfdestruct {
+        suspicious_opcodes.push("SELFDESTRUCT".to_string());
+    }
+    if has_delegatecall {
+        suspicious_opcodes.push("DELEGATECALL".to_string());
+    }
+    if has_call && (!selector_drains.is_empty() || called_function.is_some()) {
+        suspicious_opcodes.push("EXTERNAL_CALL".to_string());
+    }
+    suspicious_opcodes.extend(upgrade_hits.clone());
+
+    let mut drain_fn_names = selector_drains;
+    if let Some(function) = called_function {
+        if DRAIN_NAME_HINTS
+            .iter()
+            .any(|hint| function.to_ascii_lowercase().contains(hint))
+        {
+            drain_fn_names.push(function.to_string());
+        }
+    }
+
+    let mut score = 0;
+    if !is_verified {
+        score += 25;
+    }
+    if has_selfdestruct {
+        score += 35;
+    }
+    if has_delegatecall {
+        score += 25;
+    }
+    if is_upgradeable {
+        score += 20;
+    }
+    if suspicious_opcodes.iter().any(|opcode| opcode == "EXTERNAL_CALL") {
+        score += 15;
+    }
+    if !drain_fn_names.is_empty() {
+        score += 20;
+    }
+    if unexpected_flow {
+        score += 50;
+    }
+    if called_function
+        .map(|function| {
+            DRAIN_NAME_HINTS
+                .iter()
+                .any(|hint| function.to_ascii_lowercase().contains(hint))
+        })
+        .unwrap_or(false)
+    {
+        score += 20;
+    }
+
+    Ok(ContractRisk {
+        score: score.min(100),
+        age_blocks: 0,
+        is_verified,
+        is_upgradeable,
+        suspicious_opcodes,
+        unexpected_flow,
+        drain_fn_names,
+        analysis_backend: "evm".to_string(),
     })
 }
 
@@ -343,4 +515,49 @@ async fn fetch_wasm_code_bytes(lcd: &str, code_id: u64) -> Result<Vec<u8>> {
     STANDARD
         .decode(response.data.as_bytes())
         .context("failed to decode wasm code bytes")
+}
+
+#[derive(Debug, Deserialize)]
+struct JsonRpcResponse<T> {
+    #[serde(default)]
+    result: Option<T>,
+    #[serde(default)]
+    error: Option<JsonRpcError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JsonRpcError {
+    code: i64,
+    message: String,
+}
+
+async fn fetch_evm_code_bytes(json_rpc: &str, addr: &str) -> Result<Vec<u8>> {
+    let response: JsonRpcResponse<String> = Client::new()
+        .post(json_rpc)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getCode",
+            "params": [addr, "latest"],
+        }))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .context("failed to decode eth_getCode response")?;
+
+    if let Some(error) = response.error {
+        bail!("eth_getCode failed ({}): {}", error.code, error.message);
+    }
+
+    let raw = response
+        .result
+        .context("eth_getCode returned no result for this address")?;
+    let trimmed = raw.trim_start_matches("0x");
+    if trimmed.is_empty() {
+        bail!("contract has no deployed runtime bytecode");
+    }
+
+    decode_hex_bytes(trimmed)
 }

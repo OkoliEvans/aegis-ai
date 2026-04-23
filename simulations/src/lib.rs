@@ -1,8 +1,8 @@
 use chrono::{TimeZone, Utc};
-use guardian_analyzer::{anomaly, approvals, dust, ica, poison, reentrancy};
+use guardian_analyzer::{anomaly, approvals, dust, ica, liquidity, poison, reentrancy, slippage};
 use guardian_core::{
     models::{ApprovalRecord, TxPattern, WatchedAddress},
-    ChainEvent, IncomingTx, RiskFinding,
+    ChainEvent, IncomingTx, RiskFinding, SimulationResult, SwapExecutionInsight,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -279,6 +279,7 @@ pub fn reentrancy_pattern_scenario() -> ScenarioResult {
                 "init1reentrancylab00000000000000000000risk".to_string(),
                 "init1victimvault00000000000000000000safe".to_string(),
             ],
+            swap_execution: None,
         }),
     )
     .into_iter()
@@ -307,6 +308,125 @@ pub fn reentrancy_pattern_scenario() -> ScenarioResult {
     }
 }
 
+pub fn low_liquidity_scenario() -> ScenarioResult {
+    let target_address = "init1liquidityvictim00000000000000000000safe".to_string();
+    let tx = IncomingTx {
+        sender: target_address.clone(),
+        recipient: "init1dexrouter0000000000000000000000thin".to_string(),
+        amount: "800000".to_string(),
+        denom: "uinit".to_string(),
+        contract_address: Some("init1dexrouter0000000000000000000000thin".to_string()),
+        function_name: Some("swap".to_string()),
+        contract_msg: Some(serde_json::json!({
+            "swap": {
+                "offer_asset": {
+                    "amount": "800000",
+                    "info": { "native_token": { "denom": "uinit" } }
+                },
+                "belief_price": "0.98",
+            }
+        })),
+        controller_chain: None,
+        message_type: Some("/cosmwasm.wasm.v1.MsgExecuteContract".to_string()),
+        raw_bytes: vec![],
+        timestamp: Utc::now(),
+    };
+    let simulation = SimulationResult {
+        will_fail: false,
+        fail_reason: None,
+        gas_estimate: 275_000,
+        balance_deltas: vec![],
+        observed_actions: vec!["swap".to_string(), "route_thin_pool".to_string()],
+        touched_contracts: vec!["init1dexrouter0000000000000000000000thin".to_string()],
+        swap_execution: Some(SwapExecutionInsight {
+            offered_amount: Some(800_000),
+            return_amount: Some(1_420_000),
+            spread_amount: Some(110_000),
+            commission_amount: Some(4_200),
+            offer_pool: Some(9_000_000),
+            ask_pool: Some(17_000_000),
+        }),
+    };
+
+    let mut findings = liquidity::inspect_liquidity(&tx, Some(&simulation))
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    findings.push(RiskFinding {
+        module: "simulator".to_string(),
+        severity: guardian_core::Severity::High,
+        weight: 55,
+        description:
+            "Simulation shows the swap leaning on a thin pool and losing value through price impact"
+                .to_string(),
+        payload: serde_json::json!({
+            "address": target_address,
+            "dex": "init1dexrouter0000000000000000000000thin",
+            "price_impact_ratio": 0.0718,
+            "pool_share_ratio": 0.0889,
+        }),
+    });
+
+    ScenarioResult {
+        id: "low_liquidity",
+        attack_surface: "liquidity",
+        target_address,
+        findings,
+    }
+}
+
+pub fn high_slippage_scenario() -> ScenarioResult {
+    let target_address = "init1slippagevictim00000000000000000000safe".to_string();
+    let tx = IncomingTx {
+        sender: target_address.clone(),
+        recipient: "init1dexrouter0000000000000000000000wide".to_string(),
+        amount: "1500000".to_string(),
+        denom: "uinit".to_string(),
+        contract_address: Some("init1dexrouter0000000000000000000000wide".to_string()),
+        function_name: Some("swap".to_string()),
+        contract_msg: Some(serde_json::json!({
+            "swap": {
+                "offer_asset": {
+                    "amount": "1500000",
+                    "info": { "native_token": { "denom": "uinit" } }
+                },
+                "belief_price": "1.02",
+                "max_spread": "0.065",
+            }
+        })),
+        controller_chain: None,
+        message_type: Some("/cosmwasm.wasm.v1.MsgExecuteContract".to_string()),
+        raw_bytes: vec![],
+        timestamp: Utc::now(),
+    };
+
+    let mut findings = slippage::inspect_slippage(&tx)
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    findings.push(RiskFinding {
+        module: "simulator".to_string(),
+        severity: guardian_core::Severity::High,
+        weight: 50,
+        description:
+            "Simulation shows the router can clear the trade even after a material adverse move"
+                .to_string(),
+        payload: serde_json::json!({
+            "address": target_address,
+            "dex": "init1dexrouter0000000000000000000000wide",
+            "max_spread": 0.065,
+            "price_move_tolerated_percent": 6.5,
+        }),
+    });
+
+    ScenarioResult {
+        id: "high_slippage",
+        attack_surface: "slippage",
+        target_address,
+        findings,
+    }
+}
+
 pub fn all_scenarios() -> Vec<ScenarioResult> {
     vec![
         address_poisoning_scenario(),
@@ -314,6 +434,8 @@ pub fn all_scenarios() -> Vec<ScenarioResult> {
         approval_attack_scenario(),
         anomaly_attack_scenario(),
         ica_attack_scenario(),
+        low_liquidity_scenario(),
+        high_slippage_scenario(),
         simulated_contract_abuse_scenario(),
         reentrancy_pattern_scenario(),
     ]
@@ -383,6 +505,8 @@ mod tests {
             "approval_attack",
             "behavioral_anomaly",
             "ica_abuse",
+            "low_liquidity",
+            "high_slippage",
             "simulated_contract_abuse",
             "reentrancy_pattern",
         ] {

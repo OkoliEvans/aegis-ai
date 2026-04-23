@@ -12,6 +12,8 @@ pub struct GuardianConfig {
     pub initia_lcd: String,
     pub initia_rpc: String,
     pub initia_ws: String,
+    pub initia_json_rpc: Option<String>,
+    pub sepolia_json_rpc: Option<String>,
     pub anthropic_api_key: Option<String>,
     pub smtp_host: Option<String>,
     pub smtp_port: u16,
@@ -127,6 +129,11 @@ impl GuardianConfig {
             .context(
                 "INITIA_WS must be set or .initia/local-rollup.json must provide endpoints.rpc_ws",
             )?,
+            initia_json_rpc: env_or_fallback(
+                "INITIA_JSON_RPC",
+                env_or_fallback("VITE_CHAIN_JSON_RPC", None).as_deref(),
+            ),
+            sepolia_json_rpc: env_or_fallback("SEPOLIA_JSON_RPC", None),
             anthropic_api_key: env::var("ANTHROPIC_API_KEY").ok().filter(|v| !v.is_empty()),
             smtp_host: env::var("SMTP_HOST").ok().filter(|v| !v.is_empty()),
             smtp_port: env::var("SMTP_PORT")

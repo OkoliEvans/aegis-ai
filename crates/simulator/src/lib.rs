@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use guardian_core::{BalanceDelta, SimulationResult};
+use guardian_core::{BalanceDelta, SimulationResult, SwapExecutionInsight};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -70,8 +70,13 @@ pub async fn simulate(lcd: &str, tx_bytes: &[u8]) -> Result<SimulationResult> {
             .unwrap_or_default(),
         touched_contracts: response
             .result
+            .as_ref()
             .map(|result| extract_contracts(&result.events))
             .unwrap_or_default(),
+        swap_execution: response
+            .result
+            .as_ref()
+            .and_then(|result| extract_swap_execution(&result.events)),
     })
 }
 
@@ -203,4 +208,82 @@ fn parse_amount_and_denom(value: &str) -> (i128, String) {
     let amount = value[..split_index].parse::<i128>().unwrap_or_default();
     let denom = value[split_index..].to_string();
     (amount, denom)
+}
+
+fn extract_swap_execution(events: &[serde_json::Value]) -> Option<SwapExecutionInsight> {
+    let mut offered_amount = None;
+    let mut return_amount = None;
+    let mut spread_amount = None;
+    let mut commission_amount = None;
+    let mut offer_pool = None;
+    let mut ask_pool = None;
+
+    for event in events {
+        let attributes = event
+            .get("attributes")
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        offered_amount = offered_amount.or_else(|| {
+            find_amount_attribute(
+                &attributes,
+                &["offer_amount", "offer_asset_amount", "amount_in"],
+            )
+        });
+        return_amount = return_amount.or_else(|| {
+            find_amount_attribute(&attributes, &["return_amount", "ask_amount", "amount_out"])
+        });
+        spread_amount = spread_amount.or_else(|| {
+            find_amount_attribute(&attributes, &["spread_amount", "price_impact_amount"])
+        });
+        commission_amount = commission_amount
+            .or_else(|| find_amount_attribute(&attributes, &["commission_amount", "fee_amount"]));
+        offer_pool = offer_pool.or_else(|| {
+            find_amount_attribute(&attributes, &["offer_pool", "input_pool", "reserve_in"])
+        });
+        ask_pool = ask_pool.or_else(|| {
+            find_amount_attribute(&attributes, &["ask_pool", "output_pool", "reserve_out"])
+        });
+    }
+
+    let insight = SwapExecutionInsight {
+        offered_amount,
+        return_amount,
+        spread_amount,
+        commission_amount,
+        offer_pool,
+        ask_pool,
+    };
+
+    if insight.offered_amount.is_some()
+        || insight.return_amount.is_some()
+        || insight.spread_amount.is_some()
+        || insight.offer_pool.is_some()
+        || insight.ask_pool.is_some()
+    {
+        Some(insight)
+    } else {
+        None
+    }
+}
+
+fn find_amount_attribute(attributes: &[serde_json::Value], keys: &[&str]) -> Option<i128> {
+    keys.iter().find_map(|key| {
+        find_attribute(attributes, key).and_then(|value| parse_token_amount(&value))
+    })
+}
+
+fn parse_token_amount(value: &str) -> Option<i128> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(parsed) = trimmed.parse::<i128>() {
+        return Some(parsed);
+    }
+
+    let split_index = trimmed.find(|character: char| !character.is_ascii_digit())?;
+    trimmed[..split_index].parse::<i128>().ok()
 }

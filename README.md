@@ -52,6 +52,8 @@ Backend/runtime values:
 - `DATABASE_URL`: Postgres connection used by Diesel
 - `ANTHROPIC_API_KEY`: optional today for analyzer paths; later this can also power richer narrative email summaries beyond the current deterministic templates
 - `INITIA_CHAIN_ID`, `INITIA_LCD`, `INITIA_RPC`, `INITIA_WS`: Initia or local rollup endpoints
+- `INITIA_JSON_RPC`: optional MiniEVM JSON-RPC endpoint used for `0x...` contract inspection via `eth_getCode`
+- `SEPOLIA_JSON_RPC`: optional Sepolia JSON-RPC endpoint used when the simulation UI is switched to Sepolia analysis
 - `GUARDIAN_POLICY_CONTRACT_ADDRESS`: deployed `guardian-policy` contract address
 - `GUARDIAN_POLICY_REPORTER_KEY`: local key name allowed to write incidents/quarantines onchain
 - `GUARDIAN_POLICY_KEYRING_BACKEND`: usually `test` for local development
@@ -64,7 +66,7 @@ Frontend values:
 - `VITE_GUARDIAN_POLICY_CONTRACT_ADDRESS`: surfaced in the UI
 - `VITE_DEMO_RISK_LAB_CONTRACT_ADDRESS`: optional demo contract address for the guarded-call walkthrough
 
-Restart the Vite dev server after changing `VITE_*` values.
+Restart the backend after changing backend env values like `INITIA_JSON_RPC`, and restart the Vite dev server after changing `VITE_*` values.
 
 ## Alert Emails
 

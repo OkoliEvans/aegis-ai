@@ -47,6 +47,10 @@ pub fn build_router(state: AppState) -> Router {
             "/api/demo/risk-lab/preview",
             post(dashboard::preview_risk_lab_contract),
         )
+        .route(
+            "/api/demo/liquidity/preview",
+            post(dashboard::preview_liquidity_contract),
+        )
         .route("/api/simulations/run", post(dashboard::run_simulation))
         .route("/api/email/register", post(dashboard::register_email))
         .route("/api/email/test", post(dashboard::send_test_email))

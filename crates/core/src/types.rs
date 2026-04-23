@@ -38,6 +38,16 @@ pub struct BalanceDelta {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwapExecutionInsight {
+    pub offered_amount: Option<i128>,
+    pub return_amount: Option<i128>,
+    pub spread_amount: Option<i128>,
+    pub commission_amount: Option<i128>,
+    pub offer_pool: Option<i128>,
+    pub ask_pool: Option<i128>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationResult {
     pub will_fail: bool,
     pub fail_reason: Option<String>,
@@ -45,6 +55,7 @@ pub struct SimulationResult {
     pub balance_deltas: Vec<BalanceDelta>,
     pub observed_actions: Vec<String>,
     pub touched_contracts: Vec<String>,
+    pub swap_execution: Option<SwapExecutionInsight>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

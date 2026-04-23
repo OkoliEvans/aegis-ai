@@ -15,6 +15,7 @@ type ConfigKey =
   | "VITE_CHAIN_VM"
   | "VITE_GUARDIAN_POLICY_CONTRACT_ADDRESS"
   | "VITE_DEMO_RISK_LAB_CONTRACT_ADDRESS"
+  | "VITE_DEMO_LIQUIDITY_LAB_CONTRACT_ADDRESS"
   | "VITE_BRIDGE_SOURCE_CHAIN_ID"
   | "VITE_BRIDGE_SOURCE_DENOM";
 
@@ -40,6 +41,7 @@ export type GuardianFrontendConfig = {
   contract: {
     guardianPolicyAddress?: string;
     demoRiskLabAddress?: string;
+    demoLiquidityLabAddress?: string;
   };
   bridge: {
     sourceChainId: string;
@@ -86,8 +88,8 @@ function buildLocalDemoFallbacks(): Record<ConfigKey, string> {
     VITE_CHAIN_VM: "miniwasm",
     VITE_GUARDIAN_POLICY_CONTRACT_ADDRESS:
       "init1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3sfl43fx",
-    VITE_DEMO_RISK_LAB_CONTRACT_ADDRESS:
-      "init1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3sfl43fx",
+    VITE_DEMO_RISK_LAB_CONTRACT_ADDRESS: "",
+    VITE_DEMO_LIQUIDITY_LAB_CONTRACT_ADDRESS: "",
     VITE_BRIDGE_SOURCE_CHAIN_ID: "initiation-2",
     VITE_BRIDGE_SOURCE_DENOM: "uinit"
   };
@@ -216,6 +218,12 @@ function resolveGuardianFrontendConfig(env: ImportMetaEnv): GuardianFrontendConf
     fallbacks.VITE_DEMO_RISK_LAB_CONTRACT_ADDRESS,
     fallbacksInUse
   );
+  const demoLiquidityLabAddress = resolveValue(
+    env.VITE_DEMO_LIQUIDITY_LAB_CONTRACT_ADDRESS,
+    "VITE_DEMO_LIQUIDITY_LAB_CONTRACT_ADDRESS",
+    fallbacks.VITE_DEMO_LIQUIDITY_LAB_CONTRACT_ADDRESS,
+    fallbacksInUse
+  );
   const bridgeSourceChainId = resolveValue(
     env.VITE_BRIDGE_SOURCE_CHAIN_ID,
     "VITE_BRIDGE_SOURCE_CHAIN_ID",
@@ -250,7 +258,8 @@ function resolveGuardianFrontendConfig(env: ImportMetaEnv): GuardianFrontendConf
     },
     contract: {
       guardianPolicyAddress: guardianPolicyAddress || undefined,
-      demoRiskLabAddress: demoRiskLabAddress || guardianPolicyAddress || undefined
+      demoRiskLabAddress: demoRiskLabAddress || undefined,
+      demoLiquidityLabAddress: demoLiquidityLabAddress || undefined
     },
     bridge: {
       sourceChainId: bridgeSourceChainId,

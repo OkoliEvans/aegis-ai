@@ -38,7 +38,7 @@ export function NeuralMesh({ className }: NeuralMeshProps) {
     let animationFrame = 0;
     let pointer = { x: Number.NaN, y: Number.NaN, active: false };
 
-    const nodeCount = reducedMotion ? 80 : 140;
+    const nodeCount = reducedMotion ? 88 : 144;
     const nodes: MeshNode[] = Array.from({ length: nodeCount }, (_, index) => ({
       x: Math.random(),
       y: Math.random(),
@@ -48,7 +48,7 @@ export function NeuralMesh({ className }: NeuralMeshProps) {
       phase: Math.random() * Math.PI * 2,
       amplitude: 14 + Math.random() * 28,
       speed: 0.18 + Math.random() * 0.46,
-      hue: 170 + (index % 5) * 18
+      hue: index % 2 === 0 ? 174 + (index % 4) * 4 : 250 + (index % 3) * 8
     }));
 
     function resize() {
@@ -98,17 +98,17 @@ export function NeuralMesh({ className }: NeuralMeshProps) {
           const dx = target.drawX - source.drawX;
           const dy = target.drawY - source.drawY;
           const distance = Math.hypot(dx, dy);
-          const threshold = 120 + (source.depth + target.depth) * 40;
+          const threshold = 128 + (source.depth + target.depth) * 44;
 
           if (distance > threshold) continue;
 
-          const alpha = (1 - distance / threshold) * (0.16 + (1 - (source.depth + target.depth) * 0.5) * 0.22);
+          const alpha = (1 - distance / threshold) * (0.07 + (1 - (source.depth + target.depth) * 0.5) * 0.11);
           const gradient = context.createLinearGradient(source.drawX, source.drawY, target.drawX, target.drawY);
           gradient.addColorStop(0, `hsla(${source.hue}, 90%, 68%, ${alpha})`);
           gradient.addColorStop(1, `hsla(${target.hue}, 90%, 72%, ${alpha * 0.82})`);
 
           context.strokeStyle = gradient;
-          context.lineWidth = 0.7 + (1 - distance / threshold) * 0.7;
+          context.lineWidth = 0.45 + (1 - distance / threshold) * 0.38;
           context.beginPath();
           context.moveTo(source.drawX, source.drawY);
           context.lineTo(target.drawX, target.drawY);
@@ -118,23 +118,23 @@ export function NeuralMesh({ className }: NeuralMeshProps) {
 
       for (let index = 0; index < nodes.length; index += 1) {
         const node = nodes[index] as MeshNode & { drawX: number; drawY: number };
-        const radius = 1.2 + (1 - node.depth) * 1.8;
-        const glow = context.createRadialGradient(node.drawX, node.drawY, 0, node.drawX, node.drawY, radius * 6);
-        glow.addColorStop(0, `hsla(${node.hue}, 100%, 78%, 0.85)`);
+        const radius = 1 + (1 - node.depth) * 1.35;
+        const glow = context.createRadialGradient(node.drawX, node.drawY, 0, node.drawX, node.drawY, radius * 4.2);
+        glow.addColorStop(0, `hsla(${node.hue}, 100%, 78%, 0.42)`);
         glow.addColorStop(1, `hsla(${node.hue}, 100%, 60%, 0)`);
 
         context.fillStyle = glow;
         context.beginPath();
-        context.arc(node.drawX, node.drawY, radius * 6, 0, Math.PI * 2);
+        context.arc(node.drawX, node.drawY, radius * 4.2, 0, Math.PI * 2);
         context.fill();
 
-        context.fillStyle = `hsla(${node.hue}, 100%, 82%, 0.9)`;
+        context.fillStyle = `hsla(${node.hue}, 100%, 82%, 0.62)`;
         context.beginPath();
         context.arc(node.drawX, node.drawY, radius, 0, Math.PI * 2);
         context.fill();
       }
 
-      const orbRadius = Math.min(width, height) * 0.14;
+      const orbRadius = Math.min(width, height) * 0.12;
       const orbGradient = context.createRadialGradient(
         width * 0.74,
         height * 0.34,
@@ -143,7 +143,7 @@ export function NeuralMesh({ className }: NeuralMeshProps) {
         height * 0.34,
         orbRadius * 1.6
       );
-      orbGradient.addColorStop(0, "rgba(0, 217, 192, 0.16)");
+      orbGradient.addColorStop(0, "rgba(0, 217, 192, 0.08)");
       orbGradient.addColorStop(1, "rgba(0, 217, 192, 0)");
       context.fillStyle = orbGradient;
       context.beginPath();
