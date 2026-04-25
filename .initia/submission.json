@@ -1,7 +1,7 @@
 {
   "project_name": "Aegis Guard",
   "repo_url": "https://github.com/OkoliEvans/aegis-ai",
-  "commit_sha": "ba9965c2297f7e54bc60a04a28be4513009d1019",
+  "commit_sha": "a353475743b815770d554165b7da851900619a3f",
   "rollup_chain_id": "aegis-guard",
   "deployment_link": "https://scan.testnet.initia.xyz/custom-network/add/link?config=eyJ2bSI6Indhc20iLCJjaGFpbklkIjoiYWVnaXMtZ3VhcmQiLCJtaW5HYXNQcmljZSI6MCwiZGVub20iOiJ1bWluIiwibGNkIjoiaHR0cDovL2xvY2FsaG9zdDoxMzE3IiwicnBjIjoiaHR0cDovL2xvY2FsaG9zdDoyNjY1NyJ9",
   "transaction_link": "https://scan.testnet.initia.xyz/tx/612904D41F148FAFF05A05A6D9C45D1132768E0A153988364FE115227ECD4BCF",
