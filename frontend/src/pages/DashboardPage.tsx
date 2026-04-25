@@ -39,6 +39,7 @@ type DashboardHistoryRow = {
 type DashboardPageProps = {
   notices?: ReactNode;
   walletLabel: string;
+  approvalBadgeCount: number;
   headerDate: string;
   protectedAddress: string;
   pendingAlertCount: number;
@@ -54,9 +55,17 @@ type DashboardPageProps = {
   sphereState: "idle" | "screening" | "warned" | "blocked" | "offline";
   sphereAddresses: string[];
   feedRows: DashboardFeedRow[];
+  feedPaginationLabel: string;
+  showFeedPagination: boolean;
+  canPreviousFeedPage: boolean;
+  canNextFeedPage: boolean;
   activeRisks: DashboardRiskItem[];
   approvalRows: DashboardApprovalRow[];
   historyRows: DashboardHistoryRow[];
+  historyPaginationLabel: string;
+  showHistoryPagination: boolean;
+  canPreviousHistoryPage: boolean;
+  canNextHistoryPage: boolean;
   activeSection: string;
   onNavigateHome: () => void;
   onNavigateSetup: () => void;
@@ -64,9 +73,22 @@ type DashboardPageProps = {
   onSelectSidebar: (id: string) => void;
   onOpenWallet: () => void;
   onOpenAlerts: () => void;
+  grantDemoApprovalBusy: boolean;
+  onGrantDemoApproval: () => void;
   onRevokeApproval: (id: string) => void;
   onOpenSimulation: () => void;
+  onPreviousFeedPage: () => void;
+  onNextFeedPage: () => void;
+  onPreviousHistoryPage: () => void;
+  onNextHistoryPage: () => void;
 };
+
+function feedRiskLabel(tone: DashboardFeedRow["tone"]) {
+  if (tone === "block") return "✕ Block";
+  if (tone === "high") return "▲ High";
+  if (tone === "warn") return "△ Warn";
+  return "● Clear";
+}
 
 const sidebarGroups = [
   {
@@ -99,6 +121,7 @@ const sidebarGroups = [
 export function DashboardPage({
   notices,
   walletLabel,
+  approvalBadgeCount,
   headerDate,
   protectedAddress,
   pendingAlertCount,
@@ -114,9 +137,17 @@ export function DashboardPage({
   sphereState,
   sphereAddresses,
   feedRows,
+  feedPaginationLabel,
+  showFeedPagination,
+  canPreviousFeedPage,
+  canNextFeedPage,
   activeRisks,
   approvalRows,
   historyRows,
+  historyPaginationLabel,
+  showHistoryPagination,
+  canPreviousHistoryPage,
+  canNextHistoryPage,
   activeSection,
   onNavigateHome,
   onNavigateSetup,
@@ -124,15 +155,21 @@ export function DashboardPage({
   onSelectSidebar,
   onOpenWallet,
   onOpenAlerts,
+  grantDemoApprovalBusy,
+  onGrantDemoApproval,
   onRevokeApproval,
-  onOpenSimulation
+  onOpenSimulation,
+  onPreviousFeedPage,
+  onNextFeedPage,
+  onPreviousHistoryPage,
+  onNextHistoryPage
 }: DashboardPageProps) {
   return (
     <div className="dashboard-screen">
       <aside className="dashboard-screen__sidebar">
         <div className="dashboard-screen__brand">
           <SiteBrand />
-          <p>v1.0 · Initia Mainnet</p>
+          <p>v1.0 · Initia Testnet</p>
         </div>
 
         <div className="dashboard-screen__guard">
@@ -155,7 +192,7 @@ export function DashboardPage({
                 >
                   <span className="dashboard-screen__nav-icon">{item.icon}</span>
                   <span>{item.label}</span>
-                  {item.badge ? <span className="dashboard-screen__nav-badge">{approvalRows.length || 5}</span> : null}
+                  {item.badge ? <span className="dashboard-screen__nav-badge">{approvalBadgeCount}</span> : null}
                 </button>
               ))}
             </div>
@@ -254,9 +291,30 @@ export function DashboardPage({
           <section className="dashboard-panel-main" id="feed">
             <div className="dashboard-panel-main__head">
               <h3>Recent Transactions</h3>
-              <button className="dashboard-link-button" onClick={onOpenSimulation}>
-                View full feed →
-              </button>
+              <div className="dashboard-panel-main__actions">
+                {showFeedPagination ? (
+                  <div className="dashboard-pagination">
+                    <button
+                      className="dashboard-pagination__button"
+                      onClick={onPreviousFeedPage}
+                      disabled={!canPreviousFeedPage}
+                    >
+                      Previous
+                    </button>
+                    <span className="dashboard-pagination__label">{feedPaginationLabel}</span>
+                    <button
+                      className="dashboard-pagination__button"
+                      onClick={onNextFeedPage}
+                      disabled={!canNextFeedPage}
+                    >
+                      Next
+                    </button>
+                  </div>
+                ) : null}
+                <button className="dashboard-link-button" onClick={onOpenSimulation}>
+                  View full feed →
+                </button>
+              </div>
             </div>
 
             <div className="dashboard-feed-table">
@@ -270,7 +328,7 @@ export function DashboardPage({
               {feedRows.map((row) => (
                 <article className={`dashboard-feed-row dashboard-feed-row--${row.tone}`} key={`${row.hash}-${row.time}`}>
                   <span className={`dashboard-risk-pill dashboard-risk-pill--${row.tone}`}>
-                    {row.tone === "block" ? "✕ Block" : row.tone === "warn" ? "△ Warn" : "● Clear"}
+                    {feedRiskLabel(row.tone)}
                   </span>
                   <span>{row.hash}</span>
                   <span>{row.counterparty}</span>
@@ -305,9 +363,18 @@ export function DashboardPage({
             <section className="dashboard-rail-card" id="approvals">
               <div className="dashboard-rail-card__head">
                 <h3>Top Risky Approvals</h3>
-                <button className="dashboard-link-button" onClick={() => onSelectSidebar("approvals")}>
-                  Revoke All High →
-                </button>
+                <div className="dashboard-rail-card__actions">
+                  <button
+                    className="dashboard-rail-button dashboard-rail-button--wide"
+                    onClick={onGrantDemoApproval}
+                    disabled={grantDemoApprovalBusy}
+                  >
+                    {grantDemoApprovalBusy ? "Granting..." : "Grant Demo Approval"}
+                  </button>
+                  <button className="dashboard-link-button" onClick={() => onSelectSidebar("approvals")}>
+                    Revoke All High →
+                  </button>
+                </div>
               </div>
               <div className="dashboard-approval-table">
                 <div className="dashboard-approval-table__head">
@@ -321,16 +388,22 @@ export function DashboardPage({
                     <span className={`dashboard-risk-pill dashboard-risk-pill--${approval.tone}`}>
                       {approval.tone === "block" ? "HIGH" : "WARN"}
                     </span>
-                    <div>
+                    <div className="dashboard-approval-row__meta">
                       <strong>{approval.token}</strong>
-                      <p>{approval.spender}</p>
+                      <p className="dashboard-approval-row__spender">{approval.spender}</p>
                     </div>
-                    <span>{approval.amount}</span>
+                    <span className="dashboard-approval-row__amount">{approval.amount}</span>
                     <button className="dashboard-revoke-button" onClick={() => onRevokeApproval(approval.id)}>
                       {approval.busy ? "Revoking" : "Revoke"}
                     </button>
                   </article>
                 ))}
+                {!approvalRows.length ? (
+                  <article className="dashboard-approval-empty">
+                    <strong>No active demo approvals</strong>
+                    <p>Grant one approval to load a live revoke action into the dashboard.</p>
+                  </article>
+                ) : null}
               </div>
             </section>
           </aside>
@@ -339,9 +412,30 @@ export function DashboardPage({
         <section className="dashboard-history" id="audit">
           <div className="dashboard-history__head">
             <h3>Protection History</h3>
-            <button className="dashboard-link-button" onClick={onOpenSimulation}>
-              Open Simulation Center
-            </button>
+            <div className="dashboard-history__actions">
+              {showHistoryPagination ? (
+                <div className="dashboard-pagination">
+                  <button
+                    className="dashboard-pagination__button"
+                    onClick={onPreviousHistoryPage}
+                    disabled={!canPreviousHistoryPage}
+                  >
+                    Previous
+                  </button>
+                  <span className="dashboard-pagination__label">{historyPaginationLabel}</span>
+                  <button
+                    className="dashboard-pagination__button"
+                    onClick={onNextHistoryPage}
+                    disabled={!canNextHistoryPage}
+                  >
+                    Next
+                  </button>
+                </div>
+              ) : null}
+              <button className="dashboard-link-button" onClick={onOpenSimulation}>
+                Open Simulation Center
+              </button>
+            </div>
           </div>
           <div className="dashboard-history__list">
             {historyRows.map((row) => (

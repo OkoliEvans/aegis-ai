@@ -19,13 +19,14 @@ use crate::AppState;
 
 pub async fn proxy_handler(State(state): State<AppState>, body: Bytes) -> Json<Value> {
     let request: Value = serde_json::from_slice(&body).unwrap_or_else(|_| json!({}));
+    let request_id = request.get("id").cloned().unwrap_or(Value::Null);
     let method = request
         .get("method")
         .and_then(|value| value.as_str())
         .unwrap_or_default();
 
     if method != "broadcast_tx_sync" && method != "broadcast_tx_async" {
-        return forward_to_node(&state.config.initia_rpc, &body).await;
+        return forward_to_node(&state.config.initia_rpc, &body, &request_id).await;
     }
 
     let tx_b64 = request
@@ -37,13 +38,15 @@ pub async fn proxy_handler(State(state): State<AppState>, body: Bytes) -> Json<V
 
     let decision = state.agent.evaluate(&tx, &tx_bytes).await;
     match decision {
-        GuardianDecision::Allow => forward_to_node(&state.config.initia_rpc, &body).await,
+        GuardianDecision::Allow => {
+            forward_to_node(&state.config.initia_rpc, &body, &request_id).await
+        }
         GuardianDecision::Warn { findings } => {
             state
                 .notifier
                 .notify_guarded_transaction(&tx, &findings, None, GuardedTxOutcome::Warned)
                 .await;
-            forward_to_node(&state.config.initia_rpc, &body).await
+            forward_to_node(&state.config.initia_rpc, &body, &request_id).await
         }
         GuardianDecision::Confirm { findings } => {
             state
@@ -57,6 +60,7 @@ pub async fn proxy_handler(State(state): State<AppState>, body: Bytes) -> Json<V
                 .await;
             Json(json!({
                 "jsonrpc": "2.0",
+                "id": request_id,
                 "error": {
                     "code": -32000,
                     "message": "Transaction blocked by Guardian",
@@ -74,6 +78,7 @@ pub async fn proxy_handler(State(state): State<AppState>, body: Bytes) -> Json<V
                 .await;
             Json(json!({
                 "jsonrpc": "2.0",
+                "id": request_id,
                 "error": {
                     "code": -32000,
                     "message": "Transaction blocked by Guardian",
@@ -87,7 +92,7 @@ pub async fn proxy_handler(State(state): State<AppState>, body: Bytes) -> Json<V
     }
 }
 
-async fn forward_to_node(rpc_url: &str, body: &[u8]) -> Json<Value> {
+async fn forward_to_node(rpc_url: &str, body: &[u8], request_id: &Value) -> Json<Value> {
     let endpoint = rpc_url.trim_end_matches('/').to_string();
     let response = reqwest::Client::new()
         .post(endpoint)
@@ -101,6 +106,7 @@ async fn forward_to_node(rpc_url: &str, body: &[u8]) -> Json<Value> {
             Ok(value) => Json(value),
             Err(error) => Json(json!({
                 "jsonrpc": "2.0",
+                "id": request_id,
                 "error": {
                     "code": -32002,
                     "message": "Guardian failed to decode upstream RPC response",
@@ -110,6 +116,7 @@ async fn forward_to_node(rpc_url: &str, body: &[u8]) -> Json<Value> {
         },
         Err(error) => Json(json!({
             "jsonrpc": "2.0",
+            "id": request_id,
             "error": {
                 "code": -32001,
                 "message": "Guardian failed to contact upstream RPC",

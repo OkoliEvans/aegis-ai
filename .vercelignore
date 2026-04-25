@@ -1,0 +1,15 @@
+.git
+.agents
+.claude
+.initia
+artifacts
+contracts
+crates
+diesel.toml
+migrations
+simulations
+target
+vendor
+initia
+miniwasm
+*.log

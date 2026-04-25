@@ -6,13 +6,17 @@ type LandingPageProps = {
   onOpenHowItWorks: () => void;
   onOpenGetStarted: () => void;
   onOpenInitia: () => void;
+  headerCtaLabel: string;
+  primaryCtaLabel: string;
 };
 
 export function LandingPage({
   onConnect,
   onOpenHowItWorks,
   onOpenGetStarted,
-  onOpenInitia
+  onOpenInitia,
+  headerCtaLabel,
+  primaryCtaLabel
 }: LandingPageProps) {
   return (
     <div className="landing-screen">
@@ -27,7 +31,7 @@ export function LandingPage({
           <button onClick={onOpenInitia}>Initia</button>
         </nav>
         <button className="marketing-header__cta" onClick={onConnect}>
-          Connect Wallet
+          {headerCtaLabel}
         </button>
       </header>
 
@@ -50,7 +54,7 @@ export function LandingPage({
               <span className="landing-screen__primary-mark" aria-hidden="true">
                 <span className="landing-screen__primary-mark-inner" />
               </span>
-              <span>Connect Wallet &amp; Activate</span>
+              <span>{primaryCtaLabel}</span>
             </button>
             <button className="landing-screen__secondary" onClick={onOpenHowItWorks}>
               See How It Works →

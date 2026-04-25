@@ -35,6 +35,7 @@ type OnboardingPageProps = {
   onAddAddress: () => void;
   onSaveEmail: () => void;
   onSendTest: () => void;
+  onOpenBridge: () => void;
   onCopyRpc: (key: string) => void;
   onActivate: () => void;
 };
@@ -71,6 +72,7 @@ export function OnboardingPage({
   onAddAddress,
   onSaveEmail,
   onSendTest,
+  onOpenBridge,
   onCopyRpc,
   onActivate
 }: OnboardingPageProps) {
@@ -231,6 +233,9 @@ export function OnboardingPage({
           </button>
 
           <div className="onboarding-secondary-actions">
+            <button className="rpc-actions__button" onClick={onOpenBridge}>
+              Open Initia Bridge
+            </button>
             <button className="rpc-actions__button" onClick={onSaveEmail}>
               Save Email
             </button>

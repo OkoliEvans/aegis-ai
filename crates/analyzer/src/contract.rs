@@ -440,7 +440,7 @@ async fn score_evm_contract(
 
     let mut score = 0;
     if !is_verified {
-        score += 25;
+        score += 15;
     }
     if has_selfdestruct {
         score += 35;
@@ -451,11 +451,14 @@ async fn score_evm_contract(
     if is_upgradeable {
         score += 20;
     }
-    if suspicious_opcodes.iter().any(|opcode| opcode == "EXTERNAL_CALL") {
-        score += 15;
+    if suspicious_opcodes
+        .iter()
+        .any(|opcode| opcode == "EXTERNAL_CALL")
+    {
+        score += 10;
     }
     if !drain_fn_names.is_empty() {
-        score += 20;
+        score += 10;
     }
     if unexpected_flow {
         score += 50;

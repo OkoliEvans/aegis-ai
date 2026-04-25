@@ -24,6 +24,13 @@
       "code_id": "3",
       "contract_address": "init1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3sfl43fx",
       "instantiate_tx_hash": "612904D41F148FAFF05A05A6D9C45D1132768E0A153988364FE115227ECD4BCF"
+    },
+    "guardian_approval_lab": {
+      "source_path": "contracts/guardian-approval-lab",
+      "status": "deployed",
+      "code_id": "5",
+      "contract_address": "init1eyfccmjm6732k7wp4p6gdjwhxjwsvje44j0hfx8nkgrm8fs7vqfs4mwepz",
+      "instantiate_tx_hash": "4FE4B999A343A661CA746528E57B53D270BDBE9CB51AE966A89F7465938CF795"
     }
   },
   "notes": [

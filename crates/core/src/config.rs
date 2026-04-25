@@ -26,6 +26,7 @@ pub struct GuardianConfig {
     pub guardian_policy_reporter_key: Option<String>,
     pub guardian_policy_keyring_backend: String,
     pub guardian_policy_cli: String,
+    pub demo_approval_lab_contract_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -178,6 +179,10 @@ impl GuardianConfig {
                 .ok()
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(default_policy_cli),
+            demo_approval_lab_contract_address: env_or_fallback(
+                "DEMO_APPROVAL_LAB_CONTRACT_ADDRESS",
+                env_or_fallback("VITE_DEMO_APPROVAL_LAB_CONTRACT_ADDRESS", None).as_deref(),
+            ),
         })
     }
 

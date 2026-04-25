@@ -10,7 +10,11 @@ members = [
     "crates/app",
     "simulations",
 ]
-exclude = ["contracts/guardian-policy", "contracts/guardian-risk-lab"]
+exclude = [
+    "contracts/guardian-policy",
+    "contracts/guardian-risk-lab",
+    "contracts/guardian-approval-lab",
+]
 resolver = "2"
 
 [workspace.package]

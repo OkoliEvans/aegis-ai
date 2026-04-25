@@ -6,6 +6,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
     Json,
 };
+use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::StreamExt;
 use guardian_analyzer::{contract, liquidity};
 use guardian_core::{
@@ -19,8 +20,11 @@ use guardian_simulations::{
     dust_attack_scenario, high_slippage_scenario, ica_attack_scenario, low_liquidity_scenario,
     reentrancy_pattern_scenario, simulated_contract_abuse_scenario, ScenarioResult,
 };
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::BroadcastStream;
+use url::form_urlencoded::byte_serialize;
+use uuid::Uuid;
 
 use crate::AppState;
 
@@ -49,13 +53,17 @@ pub async fn list_approvals(
         .approval_records(&owner)
         .await
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    let demo_lab_approvals = load_demo_approval_lab_approvals(&state, &owner)
+        .await
+        .map_err(|_| axum::http::StatusCode::BAD_GATEWAY)?;
+    let stored = merge_approval_records(stored, demo_lab_approvals.clone());
 
     if params.refresh.unwrap_or(false) {
         let approvals =
             match guardian_analyzer::approvals::scan_approvals(&state.config.initia_lcd, &owner)
                 .await
             {
-                Ok(approvals) => approvals,
+                Ok(approvals) => merge_approval_records(approvals, demo_lab_approvals.clone()),
                 Err(error) if guardian_analyzer::approvals::scan_is_unavailable(&error) => {
                     return Ok(Json(stored));
                 }
@@ -70,6 +78,11 @@ pub async fn list_approvals(
     }
 
     if !stored.is_empty() {
+        state
+            .repository
+            .set_approval_records(&owner, stored.clone())
+            .await
+            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
         return Ok(Json(stored));
     }
 
@@ -79,8 +92,8 @@ pub async fn list_approvals(
     )
     .await
     {
-        Ok(approvals) => approvals,
-        Err(error) if guardian_analyzer::approvals::scan_is_unavailable(&error) => Vec::new(),
+        Ok(approvals) => merge_approval_records(approvals, demo_lab_approvals),
+        Err(error) if guardian_analyzer::approvals::scan_is_unavailable(&error) => stored,
         Err(_) => return Err(axum::http::StatusCode::BAD_GATEWAY),
     };
     state
@@ -368,10 +381,12 @@ pub async fn preview_risk_lab_contract(
     validate_analysis_network(payload.analysis_network, contract_address)
         .map_err(|(status, message)| api_error(status, message))?;
 
-    if payload.analysis_mode.unwrap_or(PreviewAnalysisMode::Inspect)
+    if payload
+        .analysis_mode
+        .unwrap_or(PreviewAnalysisMode::Inspect)
         == PreviewAnalysisMode::Inspect
     {
-        let findings =
+        let (findings, inspection) =
             inspect_contract_findings(&state, contract_address, None, payload.analysis_network)
                 .await
                 .map_err(|(status, message)| api_error(status, message))?;
@@ -385,6 +400,7 @@ pub async fn preview_risk_lab_contract(
                     "mode": "read_only"
                 }
             }),
+            inspection: Some(inspection),
         }));
     }
 
@@ -415,6 +431,7 @@ pub async fn preview_risk_lab_contract(
         contract_address: contract_address.to_string(),
         decision,
         execute_message,
+        inspection: None,
     }))
 }
 
@@ -432,10 +449,12 @@ pub async fn preview_liquidity_contract(
     validate_analysis_network(payload.analysis_network, contract_address)
         .map_err(|(status, message)| api_error(status, message))?;
 
-    if payload.analysis_mode.unwrap_or(PreviewAnalysisMode::Inspect)
+    if payload
+        .analysis_mode
+        .unwrap_or(PreviewAnalysisMode::Inspect)
         == PreviewAnalysisMode::Inspect
     {
-        let findings = inspect_contract_findings(
+        let (findings, inspection) = inspect_contract_findings(
             &state,
             contract_address,
             Some("swap"),
@@ -453,6 +472,7 @@ pub async fn preview_liquidity_contract(
                     "mode": "read_only"
                 }
             }),
+            inspection: Some(inspection),
         }));
     }
 
@@ -549,6 +569,7 @@ pub async fn preview_liquidity_contract(
         contract_address: contract_address.to_string(),
         decision,
         execute_message,
+        inspection: None,
     }))
 }
 
@@ -557,7 +578,7 @@ async fn inspect_contract_findings(
     contract_address: &str,
     called_function: Option<&str>,
     analysis_network: Option<PreviewAnalysisNetwork>,
-) -> Result<Vec<RiskFinding>, (StatusCode, String)> {
+) -> Result<(Vec<RiskFinding>, contract::ContractRisk), (StatusCode, String)> {
     let selected_json_rpc = selected_evm_rpc(state, analysis_network, contract_address)
         .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
     let risk = contract::score_contract(
@@ -588,11 +609,11 @@ async fn inspect_contract_findings(
                 "Contract metadata suggests elevated operational risk and manual review is recommended"
                     .to_string()
             },
-            payload: serde_json::to_value(risk).unwrap_or_else(|_| serde_json::json!({})),
+            payload: serde_json::to_value(&risk).unwrap_or_else(|_| serde_json::json!({})),
         });
     }
 
-    Ok(findings)
+    Ok((findings, risk))
 }
 
 fn map_contract_analysis_error(error: impl std::fmt::Display) -> (StatusCode, String) {
@@ -604,10 +625,16 @@ fn map_contract_analysis_error(error: impl std::fmt::Display) -> (StatusCode, St
         return (StatusCode::BAD_REQUEST, message);
     }
 
-    (StatusCode::BAD_GATEWAY, format!("Contract analysis failed: {message}"))
+    (
+        StatusCode::BAD_GATEWAY,
+        format!("Contract analysis failed: {message}"),
+    )
 }
 
-fn api_error(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<ApiErrorResponse>) {
+fn api_error(
+    status: StatusCode,
+    message: impl Into<String>,
+) -> (StatusCode, Json<ApiErrorResponse>) {
     (
         status,
         Json(ApiErrorResponse {
@@ -729,6 +756,107 @@ fn retarget_scenario(scenario: &mut ScenarioResult, target_address: &str) {
             }
         }
     }
+}
+
+async fn load_demo_approval_lab_approvals(
+    state: &AppState,
+    owner: &str,
+) -> anyhow::Result<Vec<ApprovalRecord>> {
+    let Some(contract_address) = state.config.demo_approval_lab_contract_address.as_deref() else {
+        return Ok(Vec::new());
+    };
+
+    let msg = serde_json::json!({
+        "allowances_by_owner": {
+            "owner": owner
+        }
+    });
+    let encoded = STANDARD.encode(serde_json::to_vec(&msg)?);
+    let encoded = byte_serialize(encoded.as_bytes()).collect::<String>();
+    let endpoint = format!(
+        "{}/cosmwasm/wasm/v1/contract/{}/smart/{}",
+        state.config.initia_lcd.trim_end_matches('/'),
+        contract_address,
+        encoded
+    );
+
+    let response = Client::new()
+        .get(endpoint)
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<DemoApprovalAllowancesEnvelope>()
+        .await?;
+
+    let current_height = 0_i64;
+
+    Ok(response
+        .data
+        .allowances
+        .into_iter()
+        .filter(|entry| entry.amount != "0")
+        .map(|entry| {
+            let amount = entry.amount;
+            let revoke_messages = serde_json::json!([
+                {
+                    "typeUrl": "/cosmwasm.wasm.v1.MsgExecuteContract",
+                    "value": {
+                        "sender": owner,
+                        "contract": contract_address,
+                        "funds": [],
+                        "msg_json": {
+                            "decrease_allowance": {
+                                "spender": entry.spender,
+                                "amount": amount
+                            }
+                        }
+                    }
+                }
+            ]);
+
+            let mut record = ApprovalRecord {
+                id: Uuid::new_v4(),
+                owner: owner.to_string(),
+                spender: entry.spender,
+                token_denom: response.data.symbol.clone(),
+                amount,
+                granted_at_height: 0,
+                revoked: false,
+                risk_score: 0,
+                approval_type: Some("cw20".to_string()),
+                contract_address: Some(contract_address.to_string()),
+                revoke_messages,
+                created_at: chrono::Utc::now(),
+            };
+            record.risk_score = guardian_analyzer::approvals::score_approval(
+                &record,
+                current_height,
+                &state.config.known_protocols,
+            );
+            record
+        })
+        .collect())
+}
+
+fn merge_approval_records(
+    mut primary: Vec<ApprovalRecord>,
+    secondary: Vec<ApprovalRecord>,
+) -> Vec<ApprovalRecord> {
+    for candidate in secondary {
+        if let Some(existing) = primary.iter_mut().find(|entry| {
+            entry.owner == candidate.owner
+                && entry.spender == candidate.spender
+                && entry.contract_address == candidate.contract_address
+                && entry.approval_type == candidate.approval_type
+        }) {
+            *existing = candidate;
+        } else {
+            primary.push(candidate);
+        }
+    }
+
+    primary.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    primary
 }
 
 async fn ensure_primary_watched_address(state: &AppState, owner: &str) -> Result<(), StatusCode> {
@@ -865,6 +993,7 @@ pub struct PreviewRiskLabResponse {
     pub contract_address: String,
     pub decision: GuardianDecision,
     pub execute_message: serde_json::Value,
+    pub inspection: Option<contract::ContractRisk>,
 }
 
 #[derive(Debug, Serialize)]
@@ -877,4 +1006,21 @@ pub struct ProtoMessage {
     #[serde(rename = "typeUrl")]
     pub type_url: String,
     pub value: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct DemoApprovalAllowancesEnvelope {
+    data: DemoApprovalAllowancesResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct DemoApprovalAllowancesResponse {
+    symbol: String,
+    allowances: Vec<DemoApprovalAllowanceEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DemoApprovalAllowanceEntry {
+    spender: String,
+    amount: String,
 }

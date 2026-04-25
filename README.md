@@ -2,6 +2,26 @@
 
 Aegis Guard is an Initia wallet protection Agent that screens outbound transactions before broadcast, evaluates risk across multiple detectors, records incidents onchain through a Guardian policy contract, and exposes the full protection history in a  dashboard.
 
+## Initia Hackathon Submission
+
+- **Project Name**: Aegis Guard
+
+### Project Overview
+
+Aegis Guard is an Initia-native wallet protection layer for users, operators, and treasury teams that want suspicious transactions screened before funds leave the wallet. It detects malicious contract interactions, stale approvals, address poisoning, dust attacks, slippage, and liquidity risk in real time, then allows, warns, confirms, or blocks the action while preserving a full onchain and offchain audit trail.
+
+### Implementation Detail
+
+- **The Custom Implementation**: We built a Guardian RPC proxy, a multi-signal risk engine, live contract analysis, simulation-driven threat walkthroughs, incident persistence, professional alerting, and an onchain Guardian policy contract that tracks trust, incidents, and quarantines. This is original product logic beyond the base rollup scaffold and turns the appchain into a pre-broadcast security decision layer.
+- **The Native Feature**: We use `interwoven-bridge` through `InterwovenKit`, so a connected user can open the Initia bridge directly from onboarding and bring assets into the protected Aegis Guard flow without leaving the app.
+
+### How to Run Locally
+
+1. Copy `.env.example` to `.env` and fill in your Postgres, RPC, SMTP, and optional analysis settings.
+2. Run `diesel migration run` from the repository root.
+3. Start the backend with `cargo run -p guardian-app`.
+4. Start the frontend with `cd frontend && pnpm install && pnpm dev`, then connect a wallet and use `Get Started` to activate protection or open the Initia bridge.
+
 ## Core Flow
 
 - Wallet traffic is routed through the Guardian RPC proxy.
@@ -63,8 +83,34 @@ Frontend values:
 
 - `VITE_API_BASE_URL`: dashboard/backend origin
 - `VITE_GUARDIAN_RPC`: RPC endpoint wallets should use for screened broadcasts
+- `VITE_BRIDGE_SOURCE_CHAIN_ID`: source chain ID used when opening the Interwoven bridge
+- `VITE_BRIDGE_SOURCE_DENOM`: source denom used when opening the Interwoven bridge
 - `VITE_GUARDIAN_POLICY_CONTRACT_ADDRESS`: surfaced in the UI
 - `VITE_DEMO_RISK_LAB_CONTRACT_ADDRESS`: optional demo contract address for the guarded-call walkthrough
+
+## Vercel Deployment
+
+- The Vercel setup in `vercel.json` deploys the Vite frontend from `frontend/` and serves `frontend/dist`.
+- The Rust Guardian backend does not run on Vercel in this setup. Host it separately, then point the frontend at that public backend.
+- Set these Vercel environment variables before deploying:
+  - `VITE_API_BASE_URL`
+  - `VITE_GUARDIAN_RPC`
+  - `VITE_CHAIN_ID`
+  - `VITE_CHAIN_NAME`
+  - `VITE_CHAIN_PRETTY_NAME`
+  - `VITE_CHAIN_RPC`
+  - `VITE_CHAIN_REST`
+  - `VITE_CHAIN_INDEXER`
+  - `VITE_CHAIN_VM`
+  - `VITE_CHAIN_DENOM`
+  - `VITE_CHAIN_ASSET_NAME`
+  - `VITE_CHAIN_ASSET_SYMBOL`
+  - `VITE_CHAIN_ASSET_DECIMALS`
+  - `VITE_GUARDIAN_POLICY_CONTRACT_ADDRESS`
+  - `VITE_DEMO_RISK_LAB_CONTRACT_ADDRESS`
+  - `VITE_DEMO_LIQUIDITY_LAB_CONTRACT_ADDRESS`
+  - `VITE_DEMO_APPROVAL_LAB_CONTRACT_ADDRESS`
+  - `VITE_DEMO_APPROVAL_SPENDER_ADDRESS`
 
 Restart the backend after changing backend env values like `INITIA_JSON_RPC`, and restart the Vite dev server after changing `VITE_*` values.
 
@@ -87,3 +133,11 @@ cd frontend && pnpm build
 - Use `Run Simulation` in the dashboard to publish a full safety drill.
 - Use `Attempt Demo Contract Call` to show Guardian blocking a suspicious contract interaction before broadcast.
 - Review `Activity Feed`, `Protection history`, and `Onchain Policy` to show local persistence plus onchain incident/quarantine sync.
+
+---
+
+Built by Mist Labs
+
+---
+
+License: MIT

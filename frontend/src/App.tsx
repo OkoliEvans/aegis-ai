@@ -128,10 +128,22 @@ type DemoContractDecision =
   | { decision: "warn" | "confirm"; findings: SimulationFinding[] }
   | { decision: "block"; findings: SimulationFinding[]; auto_revoke: boolean };
 
+type ContractInspection = {
+  score: number;
+  age_blocks: number;
+  is_verified: boolean;
+  is_upgradeable: boolean;
+  suspicious_opcodes: string[];
+  unexpected_flow: boolean;
+  drain_fn_names: string[];
+  analysis_backend: string;
+};
+
 type DemoContractPreview = {
   contract_address: string;
   decision: DemoContractDecision;
   execute_message: Record<string, unknown>;
+  inspection?: ContractInspection | null;
 };
 
 type NoticeItem = {
@@ -170,8 +182,14 @@ const apiBase = guardianFrontendConfig.api.baseUrl;
 const guardedRpcEndpoint = guardianFrontendConfig.api.guardianRpcUrl;
 const demoRiskLabAddress = guardianFrontendConfig.contract.demoRiskLabAddress;
 const demoLiquidityLabAddress = guardianFrontendConfig.contract.demoLiquidityLabAddress;
-const PAGE_SIZE = 10;
+const demoApprovalLabAddress = guardianFrontendConfig.contract.demoApprovalLabAddress;
+const demoApprovalSpenderAddress =
+  guardianFrontendConfig.contract.demoApprovalSpenderAddress ||
+  demoRiskLabAddress ||
+  undefined;
+const PAGE_SIZE = 7;
 const DEMO_ANALYSIS_ADDRESS = "init1aegisdemoanalysis000000000000000000000000";
+const DEMO_APPROVAL_AMOUNT = "340282366920938463463374607431768211455";
 
 const landingPipeline = [
   {
@@ -365,6 +383,32 @@ const fallbackFeedRows: FeedRow[] = [
   }
 ];
 
+function ensureDashboardClearRows(rows: FeedRow[]) {
+  if (!rows.length) {
+    return fallbackFeedRows;
+  }
+
+  if (rows.some((row) => row.tone === "clear")) {
+    return rows;
+  }
+
+  const supplementalClearRows = fallbackFeedRows
+    .filter((row) => row.tone === "clear")
+    .slice(0, 2);
+
+  if (!supplementalClearRows.length) {
+    return rows;
+  }
+
+  const blendedRows = [...rows];
+  supplementalClearRows.forEach((row, index) => {
+    const insertAt = index === 0 ? 1 : 4;
+    blendedRows.splice(Math.min(insertAt, blendedRows.length), 0, row);
+  });
+
+  return blendedRows;
+}
+
 function shortenAddress(value: string) {
   if (value.length < 14) return value;
   return `${value.slice(0, 10)}...${value.slice(-4)}`;
@@ -456,6 +500,33 @@ function pageSummary(total: number, page: number, pageSize: number) {
   const start = page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
   return `${start}-${end} of ${total}`;
+}
+
+function pageLabel(total: number, page: number, pageCount: number, pageSize: number) {
+  if (total === 0) return "Page 1 of 1";
+  return `Page ${page + 1} of ${pageCount} · ${pageSummary(total, page, pageSize)}`;
+}
+
+function formatApprovalAmount(amount: string) {
+  const normalized = amount.trim();
+  if (!normalized) return "0";
+  if (normalized === DEMO_APPROVAL_AMOUNT || normalized.toLowerCase() === "all") {
+    return "Unlimited";
+  }
+
+  const numeric = Number(normalized);
+  if (Number.isFinite(numeric)) {
+    if (numeric >= 1_000_000) {
+      return numeric.toLocaleString("en-US");
+    }
+    return normalized;
+  }
+
+  if (normalized.length > 18) {
+    return "Large approval";
+  }
+
+  return normalized;
 }
 
 function renderEventExcerpt(event: RiskEvent) {
@@ -564,6 +635,25 @@ function resolveAnalysisNetwork(mode: AnalysisNetworkMode, value: string) {
       };
 }
 
+function isInspectionPreview(preview: DemoContractPreview | null) {
+  return Boolean(preview?.inspection);
+}
+
+function inspectionSignalSummary(inspection: ContractInspection) {
+  const items: string[] = [];
+  if (inspection.analysis_backend) items.push(`Backend: ${inspection.analysis_backend.toUpperCase()}`);
+  items.push(inspection.is_verified ? "Verified / allowlisted" : "Not allowlisted");
+  if (inspection.is_upgradeable) items.push("Upgradeable");
+  if (inspection.unexpected_flow) items.push("Unexpected fund flow signal");
+  if (inspection.drain_fn_names.length) {
+    items.push(`Sensitive selectors: ${inspection.drain_fn_names.join(", ")}`);
+  }
+  if (inspection.suspicious_opcodes.length) {
+    items.push(`Signals: ${inspection.suspicious_opcodes.join(", ")}`);
+  }
+  return items;
+}
+
 function hashForView(view: AppView) {
   if (view === "landing") return "#/";
   if (view === "simulation") return "#/simulation";
@@ -601,7 +691,8 @@ function formatScore(score: number) {
 }
 
 export default function App() {
-  const { initiaAddress, openConnect, openWallet, requestTxBlock } = useInterwovenKit();
+  const { initiaAddress, openBridge, openConnect, openWallet, requestTxBlock } =
+    useInterwovenKit();
   const initialView = typeof window === "undefined" ? "dashboard" : readAppViewFromHash(window.location.hash);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [riskEvents, setRiskEvents] = useState<RiskEvent[]>([]);
@@ -615,6 +706,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [approvalAction, setApprovalAction] = useState<string | null>(null);
+  const [approvalGrantBusy, setApprovalGrantBusy] = useState(false);
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [simulationStage, setSimulationStage] = useState<SimulationStage>("idle");
   const [simulationRun, setSimulationRun] = useState<SimulationRun | null>(null);
@@ -653,6 +745,8 @@ export default function App() {
   }, [initiaAddress]);
 
   const marketingWalletLabel = initiaAddress ? walletLabel : "Connect Wallet";
+  const landingHeaderCtaLabel = initiaAddress ? walletLabel : "Connect Wallet";
+  const landingPrimaryCtaLabel = initiaAddress ? "Open Wallet" : "Connect Wallet & Activate";
   const resolvedReentrancyNetwork = useMemo(
     () => resolveAnalysisNetwork(reentrancyAnalysisNetwork, reentrancyContractInput),
     [reentrancyAnalysisNetwork, reentrancyContractInput]
@@ -690,8 +784,6 @@ export default function App() {
     [watchedAddresses]
   );
 
-  const feedPageCount = Math.max(1, Math.ceil(riskEvents.length / PAGE_SIZE));
-  const historyPageCount = Math.max(1, Math.ceil(riskEvents.length / PAGE_SIZE));
   const visibleHistoryEvents = useMemo(
     () => riskEvents.slice(historyPage * PAGE_SIZE, (historyPage + 1) * PAGE_SIZE),
     [historyPage, riskEvents]
@@ -845,9 +937,9 @@ export default function App() {
   }, [notices]);
 
   const dashboardFeedRows = useMemo<FeedRow[]>(() => {
-    if (riskEvents.length < 6) return fallbackFeedRows;
+    if (!riskEvents.length) return fallbackFeedRows;
 
-    return riskEvents.slice(0, 6).map((event) => {
+    const liveRows = riskEvents.map((event) => {
       const tone = riskToneFromSeverity(event.severity);
       const excerpt = renderEventExcerpt(event);
       return {
@@ -860,7 +952,15 @@ export default function App() {
         highlight: tone === "block"
       };
     });
+
+    return ensureDashboardClearRows(liveRows);
   }, [riskEvents]);
+
+  const feedPageCount = Math.max(1, Math.ceil(dashboardFeedRows.length / PAGE_SIZE));
+  const visibleDashboardFeedRows = useMemo(
+    () => dashboardFeedRows.slice(feedPage * PAGE_SIZE, (feedPage + 1) * PAGE_SIZE),
+    [dashboardFeedRows, feedPage]
+  );
 
   const pendingAlertCount = Math.max(
     2,
@@ -868,23 +968,7 @@ export default function App() {
     (approvalsAtRisk.length ? 1 : 0) + (poisonedAddresses.length ? 1 : 0)
   );
 
-  const miniApprovals = useMemo(() => {
-    if (approvalsAtRisk.length) return approvalsAtRisk.slice(0, 3);
-
-    return [
-      {
-        id: "fallback-approval",
-        owner: initiaAddress || "",
-        spender: "0x44ab...unknown",
-        token_denom: "USDC",
-        amount: "Unlimited",
-        granted_at_height: 0,
-        revoked: false,
-        risk_score: 88,
-        created_at: new Date().toISOString()
-      }
-    ] satisfies ApprovalRecord[];
-  }, [approvalsAtRisk, initiaAddress]);
+  const miniApprovals = useMemo(() => approvalsAtRisk.slice(0, 3), [approvalsAtRisk]);
 
   const dashboardActiveRisks = useMemo(() => {
     if (activeRiskItems.length) {
@@ -917,8 +1001,8 @@ export default function App() {
   }, [activeRiskItems]);
 
   const dashboardHistoryRows = useMemo(() => {
-    if (visibleHistoryEvents.length) {
-      return visibleHistoryEvents.slice(0, 5).map((event) => ({
+    if (riskEvents.length) {
+      return riskEvents.map((event) => ({
         id: event.id,
         tone: riskToneFromSeverity(event.severity),
         title: describeEventLabel(event.event_type),
@@ -927,14 +1011,20 @@ export default function App() {
       }));
     }
 
-    return fallbackFeedRows.slice(0, 5).map((row, index) => ({
+    return fallbackFeedRows.map((row, index) => ({
       id: `fallback-history-${index}`,
       tone: row.tone,
       title: row.label,
       detail: row.counterparty,
       time: row.time
     }));
-  }, [visibleHistoryEvents]);
+  }, [riskEvents]);
+
+  const historyPageCount = Math.max(1, Math.ceil(dashboardHistoryRows.length / PAGE_SIZE));
+  const visibleDashboardHistoryRows = useMemo(
+    () => dashboardHistoryRows.slice(historyPage * PAGE_SIZE, (historyPage + 1) * PAGE_SIZE),
+    [dashboardHistoryRows, historyPage]
+  );
 
   const onboardingAddresses = useMemo(() => {
     if (!watchedAddresses.length) return [];
@@ -1299,6 +1389,68 @@ export default function App() {
     }
   }
 
+  async function grantDemoApproval() {
+    if (!initiaAddress) {
+      setError("Connect a wallet before creating a demo approval.");
+      return;
+    }
+
+    if (!demoApprovalLabAddress) {
+      setError("Demo approval token is not configured yet.");
+      return;
+    }
+
+    if (!demoApprovalSpenderAddress) {
+      setError("Demo approval spender is not configured yet.");
+      return;
+    }
+
+    setError(null);
+    setApprovalGrantBusy(true);
+
+    try {
+      await requestTxBlock({
+        chainId: guardianFrontendConfig.chain.id,
+        messages: [
+          {
+            typeUrl: "/cosmwasm.wasm.v1.MsgExecuteContract",
+            value: {
+              sender: initiaAddress,
+              contract: demoApprovalLabAddress,
+              msg: new TextEncoder().encode(JSON.stringify({ claim_demo_balance: {} })),
+              funds: []
+            }
+          },
+          {
+            typeUrl: "/cosmwasm.wasm.v1.MsgExecuteContract",
+            value: {
+              sender: initiaAddress,
+              contract: demoApprovalLabAddress,
+              msg: new TextEncoder().encode(
+                JSON.stringify({
+                  increase_allowance: {
+                    spender: demoApprovalSpenderAddress,
+                    amount: DEMO_APPROVAL_AMOUNT
+                  }
+                })
+              ),
+              funds: []
+            }
+          }
+        ]
+      });
+
+      await loadDashboard(initiaAddress, true);
+      setActivationNote("Demo approval granted. You can revoke it from the approvals card.");
+    } catch (grantError) {
+      setError(
+        grantError instanceof Error ? grantError.message : "Failed to grant the demo approval"
+      );
+    } finally {
+      setApprovalGrantBusy(false);
+    }
+  }
+
   async function revokeApproval(approval: ApprovalRecord) {
     if (!initiaAddress) return;
 
@@ -1466,6 +1618,7 @@ export default function App() {
     }
 
     setError(null);
+    setReentrancyPreview(null);
     setReentrancyPreviewLoading(true);
 
     try {
@@ -1494,6 +1647,7 @@ export default function App() {
       const preview: DemoContractPreview = await previewResponse.json();
       setReentrancyPreview(preview);
     } catch (previewError) {
+      setReentrancyPreview(null);
       setError(
         previewError instanceof Error
           ? previewError.message
@@ -1524,6 +1678,7 @@ export default function App() {
     }
 
     setError(null);
+    setLiquidityPreview(null);
     setLiquidityPreviewLoading(true);
 
     try {
@@ -1552,6 +1707,7 @@ export default function App() {
       const preview: DemoContractPreview = await previewResponse.json();
       setLiquidityPreview(preview);
     } catch (previewError) {
+      setLiquidityPreview(null);
       setError(
         previewError instanceof Error
           ? previewError.message
@@ -1721,9 +1877,17 @@ export default function App() {
               description: "Simulation delta shows full balance extraction across recursive calls."
             }
           ];
+    const inspection = reentrancyPreview?.inspection ?? null;
+    const liveInspection = isInspectionPreview(reentrancyPreview);
     const isSafe = reentrancyPreview?.decision.decision === "allow";
     const decision = reentrancyPreview ? describeDecisionState(reentrancyPreview.decision.decision) : "Blocked";
-    const score = reentrancyPreview ? (isSafe ? 14 : scoreFromFindings(findings, 91)) : 91;
+    const score = reentrancyPreview
+      ? inspection
+        ? inspection.score
+        : isSafe
+          ? 14
+          : scoreFromFindings(findings, 91)
+      : 91;
     const latestMatch = simulationRun?.scenario_id === "reentrancy_pattern";
 
     return (
@@ -1736,86 +1900,155 @@ export default function App() {
         ) : null}
         <div className="attack-expanded-grid">
           <div className="attack-expanded-main">
-            <section className="attack-block">
-              <div className="attack-block__heading">Attack Call Stack — Live Simulation</div>
-              <div className="call-stack">
-                {[
-                  {
-                    depth: "1",
-                    code: "withdraw(amount=1000 ETH)",
-                    note: "VulnerableBank.sol · checks msg.sender balance",
-                    state: "Entry",
-                    tone: "clear"
-                  },
-                  {
-                    depth: "2",
-                    code: "call{value: 1000 ETH}(attacker)",
-                    note: "External call BEFORE state update — vulnerable pattern",
-                    state: "Vulnerable",
-                    tone: "warn"
-                  },
-                  {
-                    depth: "3",
-                    code: "fallback() triggered → re-enters withdraw()",
-                    note: "Balance not yet updated — check passes again",
-                    state: "Re-entry",
-                    tone: "block"
-                  },
-                  {
-                    depth: "4",
-                    code: "withdraw(amount=1000 ETH) ← re-entered",
-                    note: "Iteration 2 of N — draining continues",
-                    state: "Re-entry",
-                    tone: "block"
-                  },
-                  {
-                    depth: "N",
-                    code: "balances[attacker] = 0",
-                    note: "State update fires after all ETH is drained",
-                    state: "Too late",
-                    tone: "block"
-                  }
-                ].map((frame) => (
-                  <article className={`call-stack__row call-stack__row--${frame.tone}`} key={`${frame.depth}-${frame.code}`}>
-                    <span className="call-stack__depth">{frame.depth}</span>
-                    <div className="call-stack__copy">
-                      <strong>{frame.code}</strong>
-                      <p>{frame.note}</p>
-                    </div>
-                    <span className={`state-chip state-chip--${frame.tone}`}>{frame.state}</span>
-                  </article>
-                ))}
-              </div>
-            </section>
-
-            <section className="attack-block">
-              <div className="attack-block__heading">Contract Balance Drain — Per Recursive Call</div>
-              <div className="balance-bars">
-                {[
-                  { label: "Before", value: "100%", tone: "clear" },
-                  { label: "Call 1", value: "75%", tone: "warn" },
-                  { label: "Call 2", value: "50%", tone: "high" },
-                  { label: "Call 3", value: "25%", tone: "high" },
-                  { label: "Call 4", value: "0%", tone: "block" }
-                ].map((bar, index) => (
-                  <div className="balance-bars__item" key={bar.label}>
-                    <div className={`balance-bars__fill balance-bars__fill--${bar.tone}`} style={{ height: `${100 - index * 22}%` }} />
-                    <strong>{bar.value}</strong>
-                    <span>{bar.label}</span>
+            {liveInspection && inspection ? (
+              <>
+                <section className="attack-block">
+                  <div className="attack-block__heading">Contract Profile — Live Inspection</div>
+                  <div className="metric-grid metric-grid--two">
+                    <article className={`metric-panel ${isSafe ? "metric-panel--safe" : "metric-panel--warn"}`}>
+                      <span className="metric-panel__label">Inspection backend</span>
+                      <strong>{inspection.analysis_backend.toUpperCase()}</strong>
+                      <p>{resolvedReentrancyNetwork.label} runtime bytecode inspection.</p>
+                    </article>
+                    <article className={`metric-panel ${isSafe ? "metric-panel--safe" : "metric-panel--warn"}`}>
+                      <span className="metric-panel__label">Verification state</span>
+                      <strong>{inspection.is_verified ? "Allowlisted" : "Unknown"}</strong>
+                      <p>
+                        {inspection.is_verified
+                          ? "This contract matches a trusted/known protocol entry."
+                          : "This contract is not currently allowlisted in Guardian."}
+                      </p>
+                    </article>
+                    <article className={`metric-panel ${inspection.is_upgradeable ? "metric-panel--warn" : "metric-panel--safe"}`}>
+                      <span className="metric-panel__label">Upgradeability</span>
+                      <strong>{inspection.is_upgradeable ? "Upgradeable" : "Fixed logic"}</strong>
+                      <p>
+                        {inspection.is_upgradeable
+                          ? "Admin or upgrade selectors were detected in runtime bytecode."
+                          : "No upgrade-admin pattern was detected in the current runtime code."}
+                      </p>
+                    </article>
+                    <article className={`metric-panel ${inspection.unexpected_flow ? "metric-panel--warn" : "metric-panel--safe"}`}>
+                      <span className="metric-panel__label">Fund-flow signal</span>
+                      <strong>{inspection.unexpected_flow ? "Unexpected" : "No anomaly"}</strong>
+                      <p>
+                        {inspection.unexpected_flow
+                          ? "Guardian detected a fund-flow pattern that did not match known trusted destinations."
+                          : "No unexpected outflow path was inferred from the current preview context."}
+                      </p>
+                    </article>
                   </div>
-                ))}
-              </div>
-            </section>
+                </section>
 
-            <section className="attack-block">
-              <div className="attack-block__heading">How Aegis Guard Intercepts</div>
-              <ol className="intercept-steps">
-                <li>Bytecode scan detects external call before state write and flags the control-flow violation.</li>
-                <li>Simulation forks chain state and reveals the full balance delta before broadcast.</li>
-                <li>Token flow analysis confirms value exits to the attacker with no corresponding return path.</li>
-                <li>Guardian blocks the transaction and writes the result to the feed with a 91/100 risk score.</li>
-              </ol>
-            </section>
+                <section className="attack-block">
+                  <div className="attack-block__heading">Structural Signals</div>
+                  <div className="inspection-signal-stack">
+                    {inspectionSignalSummary(inspection).map((item) => (
+                      <article className="inspection-signal" key={item}>
+                        <strong>{item}</strong>
+                      </article>
+                    ))}
+                    {!inspectionSignalSummary(inspection).length ? (
+                      <article className="inspection-signal inspection-signal--safe">
+                        <strong>No elevated structural signals surfaced from the current bytecode pass.</strong>
+                      </article>
+                    ) : null}
+                  </div>
+                </section>
+
+                <section className="attack-block">
+                  <div className="attack-block__heading">Real Inspection Summary</div>
+                  <p className="inspection-copy">
+                    {isSafe
+                      ? "Guardian completed a live contract inspection and did not find enough evidence to classify this contract as a reentrancy or drain-path threat."
+                      : "Guardian found bytecode-level signals that elevate contract risk. This is a real inspection report derived from deployed runtime code, not a canned exploit storyboard."}
+                  </p>
+                </section>
+              </>
+            ) : (
+              <>
+                <section className="attack-block">
+                  <div className="attack-block__heading">Attack Call Stack — Live Simulation</div>
+                  <div className="call-stack">
+                    {[
+                      {
+                        depth: "1",
+                        code: "withdraw(amount=1000 ETH)",
+                        note: "VulnerableBank.sol · checks msg.sender balance",
+                        state: "Entry",
+                        tone: "clear"
+                      },
+                      {
+                        depth: "2",
+                        code: "call{value: 1000 ETH}(attacker)",
+                        note: "External call BEFORE state update — vulnerable pattern",
+                        state: "Vulnerable",
+                        tone: "warn"
+                      },
+                      {
+                        depth: "3",
+                        code: "fallback() triggered → re-enters withdraw()",
+                        note: "Balance not yet updated — check passes again",
+                        state: "Re-entry",
+                        tone: "block"
+                      },
+                      {
+                        depth: "4",
+                        code: "withdraw(amount=1000 ETH) ← re-entered",
+                        note: "Iteration 2 of N — draining continues",
+                        state: "Re-entry",
+                        tone: "block"
+                      },
+                      {
+                        depth: "N",
+                        code: "balances[attacker] = 0",
+                        note: "State update fires after all ETH is drained",
+                        state: "Too late",
+                        tone: "block"
+                      }
+                    ].map((frame) => (
+                      <article className={`call-stack__row call-stack__row--${frame.tone}`} key={`${frame.depth}-${frame.code}`}>
+                        <span className="call-stack__depth">{frame.depth}</span>
+                        <div className="call-stack__copy">
+                          <strong>{frame.code}</strong>
+                          <p>{frame.note}</p>
+                        </div>
+                        <span className={`state-chip state-chip--${frame.tone}`}>{frame.state}</span>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="attack-block">
+                  <div className="attack-block__heading">Contract Balance Drain — Per Recursive Call</div>
+                  <div className="balance-bars">
+                    {[
+                      { label: "Before", value: "100%", tone: "clear" },
+                      { label: "Call 1", value: "75%", tone: "warn" },
+                      { label: "Call 2", value: "50%", tone: "high" },
+                      { label: "Call 3", value: "25%", tone: "high" },
+                      { label: "Call 4", value: "0%", tone: "block" }
+                    ].map((bar, index) => (
+                      <div className="balance-bars__item" key={bar.label}>
+                        <div className={`balance-bars__fill balance-bars__fill--${bar.tone}`} style={{ height: `${100 - index * 22}%` }} />
+                        <strong>{bar.value}</strong>
+                        <span>{bar.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="attack-block">
+                  <div className="attack-block__heading">How Aegis Guard Intercepts</div>
+                  <ol className="intercept-steps">
+                    <li>Bytecode scan detects external call before state write and flags the control-flow violation.</li>
+                    <li>Simulation forks chain state and reveals the full balance delta before broadcast.</li>
+                    <li>Token flow analysis confirms value exits to the attacker with no corresponding return path.</li>
+                    <li>Guardian blocks the transaction and writes the result to the feed with a 91/100 risk score.</li>
+                  </ol>
+                </section>
+              </>
+            )}
           </div>
 
           <aside className="attack-expanded-side">
@@ -1826,9 +2059,10 @@ export default function App() {
                 <select
                   className="analysis-network-select"
                   value={reentrancyAnalysisNetwork}
-                  onChange={(event) =>
-                    setReentrancyAnalysisNetwork(event.target.value as AnalysisNetworkMode)
-                  }
+                  onChange={(event) => {
+                    setReentrancyAnalysisNetwork(event.target.value as AnalysisNetworkMode);
+                    setReentrancyPreview(null);
+                  }}
                 >
                   <option value="auto">Auto-detect</option>
                   <option value="wasm_move">Guardian Wasm/Move</option>
@@ -1840,7 +2074,10 @@ export default function App() {
                 <span>Contract address</span>
                 <input
                   value={reentrancyContractInput}
-                  onChange={(event) => setReentrancyContractInput(event.target.value)}
+                  onChange={(event) => {
+                    setReentrancyContractInput(event.target.value);
+                    setReentrancyPreview(null);
+                  }}
                   placeholder={resolvedReentrancyNetwork.placeholder}
                 />
               </label>
@@ -1860,7 +2097,10 @@ export default function App() {
                 {demoRiskLabAddress ? (
                   <button
                     className="ghost-button"
-                    onClick={() => setReentrancyContractInput(demoRiskLabAddress)}
+                    onClick={() => {
+                      setReentrancyContractInput(demoRiskLabAddress);
+                      setReentrancyPreview(null);
+                    }}
                   >
                     Use Demo Address
                   </button>
@@ -1885,11 +2125,21 @@ export default function App() {
                 </div>
                 <div className="analysis-card__summary">
                   <span className="analysis-label">Analysis Complete</span>
-                  <strong>{isSafe ? "Safe — No critical reentrancy signals" : `${decision} — Critical Risk`}</strong>
-                  <p>
+                  <strong>
                     {isSafe
-                      ? "The current bytecode and metadata pass did not surface drain-path, callback-loop, or unsafe control-flow signals."
-                      : "Reentrancy vulnerability confirmed via bytecode analysis, recursive call simulation, and control-flow inspection."}
+                      ? "Safe — No critical reentrancy signals"
+                      : liveInspection
+                        ? `${decision} — Elevated contract risk`
+                        : `${decision} — Critical Risk`}
+                  </strong>
+                  <p>
+                    {liveInspection
+                      ? isSafe
+                        ? "Guardian inspected the deployed runtime code and did not surface enough evidence to classify this contract as a reentrancy threat."
+                        : "Guardian inspected live bytecode and surfaced structural contract risk signals that justify manual review before interacting."
+                      : isSafe
+                        ? "The current bytecode and metadata pass did not surface drain-path, callback-loop, or unsafe control-flow signals."
+                        : "Reentrancy vulnerability confirmed via bytecode analysis, recursive call simulation, and control-flow inspection."}
                   </p>
                 </div>
               </div>
@@ -1903,9 +2153,13 @@ export default function App() {
               <div className="analysis-insight">
                 <strong>◈ AI Decompilation Insight</strong>
                 <p>
-                  {isSafe
-                    ? "Guardian completed a neutral bytecode and metadata inspection for this contract. No structural callback-drain pattern was surfaced in the current preview."
-                    : "Decompiled bytecode reveals a withdraw() path that calls the external address before updating internal balances. The fallback path re-enters recursively, matching the structural pattern behind the 2016 DAO hack."}
+                  {liveInspection && inspection
+                    ? isSafe
+                      ? `Guardian inspected ${resolvedReentrancyNetwork.label} runtime bytecode for ${reentrancyPreview?.contract_address}. No critical callback-loop pattern or privileged drain path was surfaced in this pass.`
+                      : `Guardian inspected ${resolvedReentrancyNetwork.label} runtime bytecode and found the following elevated signals: ${inspectionSignalSummary(inspection).join("; ")}.`
+                    : isSafe
+                      ? "Guardian completed a neutral bytecode and metadata inspection for this contract. No structural callback-drain pattern was surfaced in the current preview."
+                      : "Decompiled bytecode reveals a withdraw() path that calls the external address before updating internal balances. The fallback path re-enters recursively, matching the structural pattern behind the 2016 DAO hack."}
                 </p>
               </div>
             </section>
@@ -1938,56 +2192,129 @@ export default function App() {
               description: "Reserve simulation shows cascading loss if additional flow follows this trade."
             }
           ];
+    const inspection = liquidityPreview?.inspection ?? null;
+    const liveInspection = isInspectionPreview(liquidityPreview);
     const isSafe = liquidityPreview?.decision.decision === "allow";
-    const score = liquidityPreview ? (isSafe ? 18 : scoreFromFindings(findings, 84)) : 84;
+    const score = liquidityPreview
+      ? inspection
+        ? inspection.score
+        : isSafe
+          ? 18
+          : scoreFromFindings(findings, 84)
+      : 84;
     const decision = liquidityPreview ? describeDecisionState(liquidityPreview.decision.decision) : "Warn";
 
     return (
       <div className="attack-card__expanded">
         <div className="attack-expanded-grid">
           <div className="attack-expanded-main">
-            <section className="attack-block">
-              <div className="attack-block__heading">Pool Depth Snapshot</div>
-              <div className="metric-grid metric-grid--two">
-                <article className="metric-panel">
-                  <span className="metric-panel__label">TVL</span>
-                  <strong>$420K</strong>
-                  <p>Shallow for the requested swap size.</p>
-                </article>
-                <article className="metric-panel">
-                  <span className="metric-panel__label">Implied price impact</span>
-                  <strong>4.1%</strong>
-                  <p>Above the safe band for routine user flow.</p>
-                </article>
-              </div>
-              <div className="reserve-bars">
-                <div className="reserve-bars__row">
-                  <span>Pool reserve before</span>
-                  <div><i style={{ width: "100%" }} /></div>
-                  <strong>100%</strong>
-                </div>
-                <div className="reserve-bars__row">
-                  <span>After attacker drain</span>
-                  <div><i style={{ width: "58%" }} /></div>
-                  <strong>58%</strong>
-                </div>
-                <div className="reserve-bars__row">
-                  <span>After user execution</span>
-                  <div><i style={{ width: "33%" }} /></div>
-                  <strong>33%</strong>
-                </div>
-              </div>
-            </section>
+            {liveInspection && inspection ? (
+              <>
+                <section className="attack-block">
+                  <div className="attack-block__heading">Contract Profile — Live Inspection</div>
+                  <div className="metric-grid metric-grid--two">
+                    <article className={`metric-panel ${isSafe ? "metric-panel--safe" : "metric-panel--warn"}`}>
+                      <span className="metric-panel__label">Inspection backend</span>
+                      <strong>{inspection.analysis_backend.toUpperCase()}</strong>
+                      <p>{resolvedLiquidityNetwork.label} runtime bytecode inspection.</p>
+                    </article>
+                    <article className={`metric-panel ${isSafe ? "metric-panel--safe" : "metric-panel--warn"}`}>
+                      <span className="metric-panel__label">Verification state</span>
+                      <strong>{inspection.is_verified ? "Allowlisted" : "Unknown"}</strong>
+                      <p>
+                        {inspection.is_verified
+                          ? "This contract matches a trusted/known protocol entry."
+                          : "This contract is not currently allowlisted in Guardian."}
+                      </p>
+                    </article>
+                    <article className={`metric-panel ${inspection.is_upgradeable ? "metric-panel--warn" : "metric-panel--safe"}`}>
+                      <span className="metric-panel__label">Upgradeability</span>
+                      <strong>{inspection.is_upgradeable ? "Upgradeable" : "Fixed logic"}</strong>
+                      <p>
+                        {inspection.is_upgradeable
+                          ? "Admin or upgrade selectors were detected in runtime bytecode."
+                          : "No upgrade-admin pattern was detected in the current runtime code."}
+                      </p>
+                    </article>
+                    <article className={`metric-panel ${inspection.unexpected_flow ? "metric-panel--warn" : "metric-panel--safe"}`}>
+                      <span className="metric-panel__label">Liquidity anomaly</span>
+                      <strong>{inspection.unexpected_flow ? "Unexpected" : "No anomaly"}</strong>
+                      <p>
+                        {inspection.unexpected_flow
+                          ? "Guardian inferred a liquidity or fund-flow destination outside trusted destinations."
+                          : "No direct liquidity anomaly was inferred from the current preview context."}
+                      </p>
+                    </article>
+                  </div>
+                </section>
 
-            <section className="attack-block">
-              <div className="attack-block__heading">Why Guardian flags it</div>
-              <ol className="intercept-steps">
-                <li>Pool reserve inspection shows the trade would consume an unsafe share of available liquidity.</li>
-                <li>Execution simulation compares expected output against stressed pool conditions.</li>
-                <li>Projected impact is graded against production-safe slippage and depth thresholds.</li>
-                <li>Guardian warns or blocks depending on the combined liquidity and slippage score.</li>
-              </ol>
-            </section>
+                <section className="attack-block">
+                  <div className="attack-block__heading">Real Liquidity Review</div>
+                  <div className="inspection-signal-stack">
+                    {inspectionSignalSummary(inspection).map((item) => (
+                      <article className="inspection-signal" key={item}>
+                        <strong>{item}</strong>
+                      </article>
+                    ))}
+                    {!inspectionSignalSummary(inspection).length ? (
+                      <article className="inspection-signal inspection-signal--safe">
+                        <strong>No elevated liquidity-related structural signals surfaced from runtime bytecode.</strong>
+                      </article>
+                    ) : null}
+                  </div>
+                  <p className="inspection-copy">
+                    {isSafe
+                      ? "Guardian completed a live contract inspection and did not find enough evidence to classify this address as a thin-pool or liquidity-manipulation risk."
+                      : "Guardian found deployed-code signals that elevate liquidity or operational risk. This report is derived from live runtime bytecode, not a canned thin-pool storyboard."}
+                  </p>
+                </section>
+              </>
+            ) : (
+              <>
+                <section className="attack-block">
+                  <div className="attack-block__heading">Pool Depth Snapshot</div>
+                  <div className="metric-grid metric-grid--two">
+                    <article className="metric-panel">
+                      <span className="metric-panel__label">TVL</span>
+                      <strong>$420K</strong>
+                      <p>Shallow for the requested swap size.</p>
+                    </article>
+                    <article className="metric-panel">
+                      <span className="metric-panel__label">Implied price impact</span>
+                      <strong>4.1%</strong>
+                      <p>Above the safe band for routine user flow.</p>
+                    </article>
+                  </div>
+                  <div className="reserve-bars">
+                    <div className="reserve-bars__row">
+                      <span>Pool reserve before</span>
+                      <div><i style={{ width: "100%" }} /></div>
+                      <strong>100%</strong>
+                    </div>
+                    <div className="reserve-bars__row">
+                      <span>After attacker drain</span>
+                      <div><i style={{ width: "58%" }} /></div>
+                      <strong>58%</strong>
+                    </div>
+                    <div className="reserve-bars__row">
+                      <span>After user execution</span>
+                      <div><i style={{ width: "33%" }} /></div>
+                      <strong>33%</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="attack-block">
+                  <div className="attack-block__heading">Why Guardian flags it</div>
+                  <ol className="intercept-steps">
+                    <li>Pool reserve inspection shows the trade would consume an unsafe share of available liquidity.</li>
+                    <li>Execution simulation compares expected output against stressed pool conditions.</li>
+                    <li>Projected impact is graded against production-safe slippage and depth thresholds.</li>
+                    <li>Guardian warns or blocks depending on the combined liquidity and slippage score.</li>
+                  </ol>
+                </section>
+              </>
+            )}
           </div>
 
           <aside className="attack-expanded-side">
@@ -1998,9 +2325,10 @@ export default function App() {
                 <select
                   className="analysis-network-select"
                   value={liquidityAnalysisNetwork}
-                  onChange={(event) =>
-                    setLiquidityAnalysisNetwork(event.target.value as AnalysisNetworkMode)
-                  }
+                  onChange={(event) => {
+                    setLiquidityAnalysisNetwork(event.target.value as AnalysisNetworkMode);
+                    setLiquidityPreview(null);
+                  }}
                 >
                   <option value="auto">Auto-detect</option>
                   <option value="wasm_move">Guardian Wasm/Move</option>
@@ -2012,7 +2340,10 @@ export default function App() {
                 <span>Contract address</span>
                 <input
                   value={liquidityContractInput}
-                  onChange={(event) => setLiquidityContractInput(event.target.value)}
+                  onChange={(event) => {
+                    setLiquidityContractInput(event.target.value);
+                    setLiquidityPreview(null);
+                  }}
                   placeholder={resolvedLiquidityNetwork.placeholder}
                 />
               </label>
@@ -2032,7 +2363,10 @@ export default function App() {
                 {demoLiquidityLabAddress ? (
                   <button
                     className="ghost-button"
-                    onClick={() => setLiquidityContractInput(demoLiquidityLabAddress)}
+                    onClick={() => {
+                      setLiquidityContractInput(demoLiquidityLabAddress);
+                      setLiquidityPreview(null);
+                    }}
                   >
                     Use Demo Address
                   </button>
@@ -2057,11 +2391,21 @@ export default function App() {
                 </div>
                 <div className="analysis-card__summary">
                   <span className="analysis-label">Liquidity Review</span>
-                  <strong>{isSafe ? "Safe — No elevated liquidity risk" : `${decision} — Thin Pool Risk`}</strong>
-                  <p>
+                  <strong>
                     {isSafe
-                      ? "Guardian did not detect critical thin-pool or contract-level liquidity signals in the current preview."
-                      : "Reserve simulation shows the pool cannot absorb the requested trade without unacceptable impact."}
+                      ? "Safe — No elevated liquidity risk"
+                      : liveInspection
+                        ? `${decision} — Elevated contract risk`
+                        : `${decision} — Thin Pool Risk`}
+                  </strong>
+                  <p>
+                    {liveInspection
+                      ? isSafe
+                        ? "Guardian inspected deployed runtime code and did not surface enough evidence to classify this contract as a liquidity manipulation risk."
+                        : "Guardian inspected live bytecode and surfaced structural contract risk signals that justify manual review before trading through this address."
+                      : isSafe
+                        ? "Guardian did not detect critical thin-pool or contract-level liquidity signals in the current preview."
+                        : "Reserve simulation shows the pool cannot absorb the requested trade without unacceptable impact."}
                   </p>
                 </div>
               </div>
@@ -2071,6 +2415,17 @@ export default function App() {
                 "Safe contract preview",
                 "No elevated liquidity or contract-level findings were surfaced for this address."
               )}
+
+              <div className="analysis-insight">
+                <strong>◈ AI Decompilation Insight</strong>
+                <p>
+                  {liveInspection && inspection
+                    ? isSafe
+                      ? `Guardian inspected ${resolvedLiquidityNetwork.label} runtime bytecode for ${liquidityPreview?.contract_address}. No critical thin-pool, swap-path, or privileged drain signal was surfaced in this pass.`
+                      : `Guardian inspected ${resolvedLiquidityNetwork.label} runtime bytecode and found the following elevated signals: ${inspectionSignalSummary(inspection).join("; ")}.`
+                    : "Guardian correlates bytecode, pool-state simulation, and routing context before grading liquidity manipulation risk."}
+                </p>
+              </div>
             </section>
           </aside>
         </div>
@@ -2653,6 +3008,8 @@ export default function App() {
         onOpenHowItWorks={() => navigateToView("simulation")}
         onOpenGetStarted={() => navigateToView("setup")}
         onOpenInitia={() => (initiaAddress ? navigateToView("dashboard") : openConnect())}
+        headerCtaLabel={landingHeaderCtaLabel}
+        primaryCtaLabel={landingPrimaryCtaLabel}
       />
     );
   }
@@ -2708,6 +3065,12 @@ export default function App() {
         onSendTest={() => {
           void sendTestEmail();
         }}
+        onOpenBridge={() =>
+          openBridge({
+            srcChainId: guardianFrontendConfig.bridge.sourceChainId,
+            srcDenom: guardianFrontendConfig.bridge.sourceDenom
+          })
+        }
         onCopyRpc={(key) => {
           void copyText(guardedRpcEndpoint, key);
         }}
@@ -2722,6 +3085,7 @@ export default function App() {
     <DashboardPage
       notices={renderNotices()}
       walletLabel={walletLabel}
+      approvalBadgeCount={approvalsAtRisk.length}
       headerDate={dashboardHeaderDate}
       protectedAddress={dashboardProtectedAddress}
       pendingAlertCount={pendingAlertCount}
@@ -2744,23 +3108,36 @@ export default function App() {
       rpcStatusText={`12ms · ${apiStatus === "online" ? "100% uptime" : "offline"}`}
       sphereState={protectionState}
       sphereAddresses={dashboardSphereAddresses}
-      feedRows={dashboardFeedRows.map((row) => ({
+      feedRows={visibleDashboardFeedRows.map((row) => ({
         tone: row.tone,
         hash: row.hash,
         counterparty: row.counterparty,
         value: row.value,
         time: row.time
       }))}
+      feedPaginationLabel={pageLabel(dashboardFeedRows.length, feedPage, feedPageCount, PAGE_SIZE)}
+      showFeedPagination={dashboardFeedRows.length > PAGE_SIZE}
+      canPreviousFeedPage={feedPage > 0}
+      canNextFeedPage={feedPage < feedPageCount - 1}
       activeRisks={dashboardActiveRisks}
       approvalRows={miniApprovals.map((approval) => ({
         id: approval.id,
         tone: riskToneFromScore(approval.risk_score),
         token: approval.token_denom,
         spender: shortenAddress(approval.spender),
-        amount: approval.amount,
+        amount: formatApprovalAmount(approval.amount),
         busy: approvalAction === approval.id
       }))}
-      historyRows={dashboardHistoryRows}
+      historyRows={visibleDashboardHistoryRows}
+      historyPaginationLabel={pageLabel(
+        dashboardHistoryRows.length,
+        historyPage,
+        historyPageCount,
+        PAGE_SIZE
+      )}
+      showHistoryPagination={dashboardHistoryRows.length > PAGE_SIZE}
+      canPreviousHistoryPage={historyPage > 0}
+      canNextHistoryPage={historyPage < historyPageCount - 1}
       activeSection={activeSection}
       onNavigateHome={() => navigateToView("landing")}
       onNavigateSetup={() => navigateToView("setup")}
@@ -2768,6 +3145,10 @@ export default function App() {
       onSelectSidebar={openDashboardSidebarItem}
       onOpenWallet={initiaAddress ? openWallet : openConnect}
       onOpenAlerts={() => openDashboardSidebarItem("alerts")}
+      grantDemoApprovalBusy={approvalGrantBusy}
+      onGrantDemoApproval={() => {
+        void grantDemoApproval();
+      }}
       onRevokeApproval={(id) => {
         const approval = miniApprovals.find((entry) => entry.id === id);
         if (approval) {
@@ -2775,6 +3156,12 @@ export default function App() {
         }
       }}
       onOpenSimulation={() => navigateToView("simulation")}
+      onPreviousFeedPage={() => setFeedPage((current) => Math.max(current - 1, 0))}
+      onNextFeedPage={() => setFeedPage((current) => Math.min(current + 1, feedPageCount - 1))}
+      onPreviousHistoryPage={() => setHistoryPage((current) => Math.max(current - 1, 0))}
+      onNextHistoryPage={() =>
+        setHistoryPage((current) => Math.min(current + 1, historyPageCount - 1))
+      }
     />
   );
 

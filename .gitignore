@@ -21,6 +21,7 @@ skills-lock.json
 node_modules/
 dist/
 .turbo/
+artifacts/
 initia/
 miniwasm/
 
@@ -32,3 +33,4 @@ contracts/**/Cargo.lock
 # Local project reference docs
 GUARDIAN_IMPL_GUIDE (1).md
 GUARDIAN_README (1).md
+.vercel

@@ -35,6 +35,12 @@ impl GuardianAgent {
         let policy = self.fetch_policy(policy_client.as_ref(), &tx.sender).await;
         let thresholds = DecisionThresholds::from_policy(policy.as_ref());
         let mut trusted_entities = self.config.known_protocols.clone();
+        trusted_entities.extend(
+            self.config
+                .demo_approval_lab_contract_address
+                .iter()
+                .cloned(),
+        );
         if let Some(policy) = policy.as_ref() {
             trusted_entities.extend(policy.trusted_contracts.iter().cloned());
             trusted_entities.extend(policy.trusted_recipients.iter().cloned());
@@ -66,6 +72,7 @@ impl GuardianAgent {
             .map(|delta| delta.address.clone());
 
         let mut findings = Vec::new();
+        let is_risk_reducing_action = is_risk_reducing_contract_action(tx);
 
         if let Some(finding) = poison::check_poison(&tx.recipient, &known_addrs) {
             findings.push(finding);
@@ -119,7 +126,7 @@ impl GuardianAgent {
         };
 
         if let Some(risk) = &contract_risk {
-            if risk.score >= 50 {
+            if !is_risk_reducing_action && risk.score >= 50 {
                 findings.push(RiskFinding {
                     module: "contract".to_string(),
                     severity: if risk.score >= 80 {
@@ -133,7 +140,7 @@ impl GuardianAgent {
                 });
             }
 
-            if !risk.is_verified {
+            if !is_risk_reducing_action && !risk.is_verified {
                 if let Some(api_key) = self.config.anthropic_api_key.as_deref() {
                     if let Some(contract_address) = tx.contract_address.as_deref() {
                         if let Ok(bytecode) = contract::fetch_module_bytecode_pub(
@@ -172,9 +179,10 @@ impl GuardianAgent {
             }
         }
 
-        if policy
-            .as_ref()
-            .is_some_and(|entry| entry.auto_block_new_contracts)
+        if !is_risk_reducing_action
+            && policy
+                .as_ref()
+                .is_some_and(|entry| entry.auto_block_new_contracts)
             && tx.contract_address.is_some()
         {
             let contract_address = tx.contract_address.as_deref().unwrap_or_default();
@@ -420,6 +428,13 @@ impl GuardianAgent {
     }
 }
 
+fn is_risk_reducing_contract_action(tx: &IncomingTx) -> bool {
+    matches!(
+        tx.function_name.as_deref(),
+        Some("decrease_allowance" | "revoke" | "revoke_all")
+    )
+}
+
 #[derive(Debug, Clone, Copy)]
 struct DecisionThresholds {
     warn: i32,
@@ -521,6 +536,7 @@ mod tests {
                 guardian_policy_reporter_key: None,
                 guardian_policy_keyring_backend: "test".to_string(),
                 guardian_policy_cli: "minitiad".to_string(),
+                demo_approval_lab_contract_address: None,
             },
             Arc::new(InMemoryRepository::default()),
         )

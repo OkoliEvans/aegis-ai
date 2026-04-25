@@ -1,0 +1,8 @@
+{
+  "name": "aegis-guard-root",
+  "private": true,
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "build": "pnpm --dir frontend build"
+  }
+}
